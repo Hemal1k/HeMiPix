@@ -4,7 +4,7 @@
 
 Photos from an iPhone are HEIC – and many programs and websites still want **JPG**. HeMiPix converts photos between
 **HEIC, JPG, PNG, WebP and TIFF** – **whole folders at once** –, can make them **smaller** and lets you **crop** each
-photo with a frame you drag. In the look of Windows 11, English and Czech, and it never goes online.
+photo with a frame you drag. In the look of Windows 11, and it never goes online.
 
 **[Download](https://github.com/Hemal1k/HeMiPix/releases/latest)** · [Project page](https://hemal1k.github.io/hemipix.html) · [Report a problem](https://github.com/Hemal1k/HeMiPix/issues)
 
@@ -16,11 +16,12 @@ photo with a frame you drag. In the look of Windows 11, English and Czech, and i
 
 | File | For |
 |---|---|
-| `HeMiPix-Setup.exe` | The installer – just for you (no administrator) or for all users (Program Files), with a Start menu entry, an optional desktop shortcut and an uninstaller. |
-| `HeMiPix-Portable.zip` | Just the program; run it from any folder. |
+| `HeMiPix-Setup.exe` | The installer – just for you (no administrator) or for all users (Program Files), x64 or ARM64, with a Start menu entry, an optional desktop shortcut and an uninstaller. |
+| `HeMiPix-Portable.zip` | Just the program for x64; run it from any folder. |
+| `HeMiPix-Portable-arm64.zip` | The same for Windows on ARM. |
 
-Windows 10 / 11, x64. HEIC is read by Windows itself: it needs the free **HEIF Image Extensions** and **HEVC Video
-Extensions** from the Microsoft Store (most PCs have them; HeMiPix offers the links when they are missing).
+Windows 10 / 11, x64 and ARM64. HEIC is read by Windows itself: it needs the free **HEIF Image Extensions** and **HEVC Video
+Extensions** from the Microsoft Store (most PCs have them; the installer – and the portable version itself – offers to install them when they are missing).
 
 ## Features
 
@@ -42,7 +43,7 @@ Extensions** from the Microsoft Store (most PCs have them; HeMiPix offers the li
 - **File Explorer item** “Convert with HeMiPix” for HEIC photos and folders – a switch in the window, off by default,
   written only for the current user.
 
-Its settings are in `%AppData%\HeMiPix\settings.ini`.
+Its settings are in `%AppData%\HeMi\HeMiPix\settings.ini`.
 
 ## Building
 
@@ -73,7 +74,7 @@ installer (`installer\HeMiPix.iss`) and the portable zip. A release published on
 | `src\inbox.rs` | Photos from other starts of HeMiPix (File Explorer starts it once per selected photo). |
 | `src\settings.rs` | What HeMiPix remembers between runs. |
 | `src\shell_menu.rs` | The optional File Explorer item (`HKCU\Software\Classes`). |
-| `src\theme.rs`, `src\widgets.rs`, `src\i18n.rs` | The Windows 11 look in egui and the English / Czech texts. |
+| `src\theme.rs`, `src\widgets.rs`, `src\i18n.rs` | The Windows 11 look in egui and the texts in two languages. |
 | `assets` | The icon and the notices of the components. |
 
 ## License

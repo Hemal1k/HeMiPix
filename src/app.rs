@@ -7,7 +7,8 @@ use crate::crop::{Editor, Ratio};
 use crate::i18n::{self, tr};
 use crate::settings::{Existing, Output, Settings};
 use crate::theme::{self, Palette, glyph};
-use crate::widgets::{Btn, CARD_RADIUS, Tone, card, dropdown, glyph_box, info_bar, progress, row_layout, section, slider, toggle, two_lines};
+use crate::deps::{self, Missing};
+use crate::widgets::{Btn, CARD_RADIUS, Tone, card, checkbox, dropdown, glyph_box, info_bar, progress, row_layout, section, slider, toggle, two_lines};
 use eframe::egui::{self, Align, Align2, Id, LayerId, Layout, Margin, Order, RichText, Stroke, StrokeKind, vec2};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
@@ -23,9 +24,7 @@ use std::time::{Duration, Instant};
 /// Problems and ideas: the Issues of the project on GitHub (no e-mail address in the public code).
 const CONTACT: &str = "github.com/Hemal1k/HeMiPix/issues";
 const RELEASES: &str = "github.com/Hemal1k/HeMiPix/releases";
-/// The free extensions of the Microsoft Store that let Windows read HEIC.
-const STORE_HEIF: &str = "ms-windows-store://pdp/?ProductId=9PMMSR1CGPWG";
-const STORE_HEVC: &str = "ms-windows-store://pdp/?ProductId=9N4WGH0Z6VHQ";
+const PROJECT: &str = "github.com/Hemal1k/HeMiPix";
 /// The longer side of the preview in the crop editor.
 const PREVIEW: u32 = 1800;
 
@@ -73,8 +72,14 @@ enum Action {
     About(bool),
     Open(String),
     OpenLicences,
+    /// HeMi Launcher, for the updates.
+    Launcher,
     DismissToast,
     DismissCodec,
+    /// The extensions of the Microsoft Store: look again and offer them, install them, not now.
+    ShowDeps,
+    InstallDeps,
+    CloseDeps,
     /// The crop editor: open for a photo, apply (and go on to another photo), close.
     Crop(usize),
     CropApply(Option<usize>),
@@ -106,6 +111,12 @@ pub struct HeMiPixApp {
     last_out: Option<PathBuf>,
     /// Mica of Windows 11 behind the window (the background is transparent then).
     mica: bool,
+    /// The extensions for HEIC: what is missing (the dialog is open while Some), accepted, installing since.
+    deps: Option<Missing>,
+    deps_accept: bool,
+    deps_installing: bool,
+    deps_tx: Sender<Missing>,
+    deps_rx: Receiver<Missing>,
 }
 
 impl HeMiPixApp {
@@ -121,6 +132,7 @@ impl HeMiPixApp {
         let mica = theme::style_window(hwnd, &p, true);
         let (tx, rx) = channel();
         let (preview_tx, preview_rx) = channel();
+        let (deps_tx, deps_rx) = channel();
         let mut app = HeMiPixApp {
             s: Settings::load(),
             items: Vec::new(),
@@ -143,7 +155,13 @@ impl HeMiPixApp {
             no_codec: false,
             last_out: None,
             mica,
+            deps: None,
+            deps_accept: false,
+            deps_installing: false,
+            deps_tx,
+            deps_rx,
         };
+        app.check_deps(&cc.egui_ctx);
         app.add(paths);
         app
     }
@@ -298,6 +316,18 @@ impl HeMiPixApp {
                 }
             }
         }
+        while let Ok(m) = self.deps_rx.try_recv() {
+            if self.deps_installing {
+                if !m.any() {
+                    self.deps_installing = false;
+                    self.deps = None;
+                    self.no_codec = false;
+                    self.toast(tr("The extensions are installed – HEIC works now.", "Rozšíření jsou nainstalovaná – HEIC teď funguje."), Tone::Success);
+                }
+            } else if m.any() {
+                self.deps = Some(m);
+            }
+        }
         while let Ok((generation, r)) = self.preview_rx.try_recv() {
             let Some(ed) = &mut self.editor else { continue };
             if ed.generation != generation {
@@ -318,6 +348,15 @@ impl HeMiPixApp {
 
     fn toast(&mut self, text: impl Into<String>, tone: Tone) {
         self.toast = Some(Toast { text: text.into(), tone, until: Instant::now() + Duration::from_secs(6) });
+    }
+
+    /// Asks on another thread what of the HEIC extensions is missing (the answer opens the dialog when something is).
+    fn check_deps(&self, ctx: &egui::Context) {
+        let (tx, ctx) = (self.deps_tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(deps::check());
+            ctx.request_repaint();
+        });
     }
 
     /// The crop editor for photo `idx`; its preview is made on another thread.
@@ -438,36 +477,28 @@ impl HeMiPixApp {
         value(ui, tr("Author", "Autor"), "Richard Hemala");
         value(ui, tr("Version", "Verze"), &format!("Beta {}", env!("CARGO_PKG_VERSION")));
         value(ui, tr("Build date", "Datum sestavení"), &i18n::build_date());
-        let button = |ui: &mut egui::Ui, title: &str, detail: Option<&str>, label: &str, tip: &str, act: Action, acts: &mut Vec<Action>| {
+        // as the About page of HeMiDock: a title and the button, no descriptions
+        let open = |ui: &mut egui::Ui, title: &str, tip: &str, act: Action, acts: &mut Vec<Action>| {
             card(ui, &p, |ui| {
                 row_layout(ui, 44.0, |ui| {
-                    match detail {
-                        Some(d) => two_lines(ui, &p, title, d),
-                        None => {
-                            ui.label(RichText::new(title).size(14.0).color(p.text));
-                        }
-                    }
+                    ui.label(RichText::new(title).size(14.0).color(p.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if Btn::new(label).tip(tip).show(ui, &p).clicked() {
+                        if Btn::new(tr("Open", "Otevřít")).tip(tip).show(ui, &p).clicked() {
                             acts.push(act);
                         }
                     });
                 });
             });
         };
-        button(ui, tr("Contact", "Kontakt"), None, tr("Report a problem", "Nahlásit problém"), CONTACT, Action::Open(format!("https://{CONTACT}")), acts);
-        let whats_new = tr("The changes of every version and new downloads", "Změny každé verze a nové verze ke stažení");
-        button(ui, tr("What's new", "Co je nového"), Some(whats_new), tr("Open", "Otevřít"), RELEASES, Action::Open(format!("https://{RELEASES}")), acts);
-        let licences = tr("Licences of the components used", "Licence použitých součástí");
-        button(ui, tr("Licences", "Licence"), Some(licences), tr("Open", "Otevřít"), "", Action::OpenLicences, acts);
-        ui.add_space(16.0);
-        let note = tr(
-            "HEIC photos are read by Windows itself (HEIF Image Extensions and HEVC Video Extensions from the Microsoft Store). HeMiPix never goes online.",
-            "Fotky HEIC čte samotný Windows (Rozšíření obrázků HEIF a Rozšíření videa HEVC z Microsoft Storu). HeMiPix se nikdy nepřipojuje k internetu.",
-        );
-        ui.add(egui::Label::new(RichText::new(note).size(12.0).color(p.text2)).wrap());
+        open(ui, tr("Project on GitHub", "Projekt na GitHubu"), PROJECT, Action::Open(format!("https://{PROJECT}")), acts);
+        open(ui, tr("What's new", "Co je nového"), RELEASES, Action::Open(format!("https://{RELEASES}")), acts);
+        // HeMi Launcher on this PC: the updates are its job
+        if crate::launcher::exe().is_some() {
+            open(ui, tr("Updates in HeMi Launcher", "Aktualizace v HeMi Launcheru"), "HeMi Launcher", Action::Launcher, acts);
+        }
+        open(ui, tr("Report a problem", "Nahlásit problém"), CONTACT, Action::Open(format!("https://{CONTACT}")), acts);
+        open(ui, tr("Licences", "Licence"), "", Action::OpenLicences, acts);
     }
-
     fn list(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let busy = self.run.is_some();
@@ -607,8 +638,8 @@ impl HeMiPixApp {
         painter.text(c - vec2(0.0, 44.0), Align2::CENTER_CENTER, glyph::PHOTO, theme::icon(44.0), p.text3);
         painter.text(c + vec2(0.0, 8.0), Align2::CENTER_CENTER, tr("Drop photos or folders here", "Přetáhni sem fotky nebo složky"), theme::semibold(16.0), p.text);
         let hint = tr(
-            "HEIC, PNG, WebP … become JPG, PNG, WebP or TIFF – all at once, smaller and cropped if you wish.",
-            "Z HEIC, PNG, WebP … udělá JPG, PNG, WebP nebo TIFF – všechny najednou, a když chceš, menší a oříznuté.",
+            "To JPG, PNG, WebP or TIFF – all at once.",
+            "Na JPG, PNG, WebP nebo TIFF – všechny najednou.",
         );
         painter.text(c + vec2(0.0, 34.0), Align2::CENTER_CENTER, hint, theme::body(13.0), p.text2);
     }
@@ -704,7 +735,7 @@ impl HeMiPixApp {
             });
             card(ui, &p, |ui| {
                 row_layout(ui, 36.0, |ui| {
-                    two_lines(ui, &p, tr("File exists", "Soubor už existuje"), tr("A file of the same name", "Soubor stejného jména"));
+                    ui.label(RichText::new(tr("If the file exists", "Pokud soubor již existuje")).size(14.0).color(p.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let items = [tr("Add a number", "Přidat číslo"), tr("Replace it", "Nahradit"), tr("Skip the photo", "Fotku přeskočit")];
                         let cur = match self.s.existing {
@@ -720,28 +751,25 @@ impl HeMiPixApp {
             });
             card(ui, &p, |ui| {
                 row_layout(ui, 36.0, |ui| {
+                    // one choice: everything, everything but the location, or nothing (TIFF gets none)
                     let detail = if self.s.format.has_exif() {
-                        tr("Date, camera, location (Exif)", "Datum, fotoaparát, poloha (Exif)")
+                        tr("Date, camera, location", "Datum, fotoaparát, poloha")
                     } else {
                         tr("Not carried into TIFF", "Do TIFF se nepřenášejí")
                     };
                     two_lines(ui, &p, tr("Metadata", "Metadata"), detail);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if toggle(ui, &p, self.s.keep_exif).clicked() {
-                            self.s.keep_exif = !self.s.keep_exif;
+                        let items = [tr("Keep all", "Ponechat vše"), tr("Without location", "Bez polohy"), tr("Remove", "Odstranit")];
+                        let cur = match (self.s.keep_exif, self.s.remove_gps) {
+                            (false, _) => 2,
+                            (true, true) => 1,
+                            (true, false) => 0,
+                        };
+                        if let Some(i) = dropdown(ui, &p, cur, &items, control) {
+                            (self.s.keep_exif, self.s.remove_gps) = [(true, false), (true, true), (false, false)][i];
                         }
                     });
                 });
-                if self.s.keep_exif {
-                    row_layout(ui, 36.0, |ui| {
-                        ui.label(RichText::new(tr("Without the location", "Bez polohy")).size(14.0).color(p.text));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if toggle(ui, &p, self.s.remove_gps).clicked() {
-                                self.s.remove_gps = !self.s.remove_gps;
-                            }
-                        });
-                    });
-                }
             });
         });
         if self.s != before {
@@ -764,11 +792,8 @@ impl HeMiPixApp {
                 None,
             );
             ui.horizontal(|ui| {
-                if Btn::new(tr("HEIF Image Extensions", "Rozšíření obrázků HEIF")).icon(glyph::OPEN_FILE).show(ui, &p).clicked() {
-                    acts.push(Action::Open(STORE_HEIF.into()));
-                }
-                if Btn::new(tr("HEVC Video Extensions", "Rozšíření videa HEVC")).icon(glyph::OPEN_FILE).show(ui, &p).clicked() {
-                    acts.push(Action::Open(STORE_HEVC.into()));
+                if Btn::new(tr("Install the extensions…", "Nainstalovat rozšíření…")).icon(glyph::ADD).accent().show(ui, &p).clicked() {
+                    acts.push(Action::ShowDeps);
                 }
                 if Btn::new(tr("Hide", "Skrýt")).subtle().show(ui, &p).clicked() {
                     acts.push(Action::DismissCodec);
@@ -879,6 +904,72 @@ impl HeMiPixApp {
         });
     }
 
+    /// "Photo extensions from Microsoft": as the page of the installer – what is missing, the links to the license terms,
+    /// the acceptance, then Install.
+    fn deps_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Action>) {
+        let Some(m) = self.deps else { return };
+        let p = self.p;
+        let frame = egui::Frame::new().fill(p.dialog).stroke(Stroke::new(1.0, p.card_stroke)).corner_radius(8).shadow(ctx.global_style().visuals.window_shadow);
+        let width = 480.0;
+        let modal = egui::Modal::new(Id::unique("deps")).backdrop_color(p.smoke).frame(frame).show(ctx, |ui| {
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            egui::Frame::new().inner_margin(Margin { left: 24, right: 24, top: 22, bottom: 20 }).show(ui, |ui| {
+                ui.set_width(width - 48.0);
+                ui.label(RichText::new(tr("Photo extensions from Microsoft", "Rozšíření fotek od Microsoftu")).font(theme::semibold(20.0)).color(p.text));
+                ui.add_space(10.0);
+                let text = tr(
+                    "HEIC photos are read by Windows itself, with two free extensions that are missing on this PC. Without them HeMiPix converts everything but HEIC.",
+                    "Fotky HEIC čte samotný Windows pomocí dvou bezplatných rozšíření, která v tomto počítači chybí. Bez nich HeMiPix převede vše kromě HEIC.",
+                );
+                ui.add(egui::Label::new(RichText::new(text).size(14.0).color(p.text)).wrap());
+                ui.add_space(12.0);
+                for (name, link, missing) in [("HEIF Image Extensions", deps::HEIF_LICENSE, m.heif), ("HEVC Video Extensions", deps::HEVC_PAGE, m.hevc)] {
+                    if !missing {
+                        continue;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        ui.label(RichText::new(format!("•  {name}")).font(theme::semibold(14.0)).color(p.text));
+                        if ui.add(egui::Label::new(RichText::new(tr("license terms", "licenční podmínky")).size(14.0).color(p.accent_text).underline()).sense(egui::Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            acts.push(Action::Open(link.into()));
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+                ui.add_space(8.0);
+                if self.deps_installing {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(16.0).color(p.accent_text));
+                        ui.add_space(8.0);
+                        let wait = tr("Installing – finish the window of the Microsoft Store if it opened…", "Instaluji – pokud se otevřelo okno Microsoft Storu, dokonči v něm instalaci…");
+                        ui.add(egui::Label::new(RichText::new(wait).size(13.0).color(p.text2)).wrap());
+                    });
+                } else if checkbox(ui, &p, self.deps_accept, tr("I accept the license terms and want them installed", "Souhlasím s licenčními podmínkami a chci je nainstalovat")).clicked() {
+                    self.deps_accept = !self.deps_accept;
+                }
+            });
+            egui::Frame::new().fill(p.dialog_foot).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: 8, se: 8 }).inner_margin(Margin::same(24)).show(ui, |ui| {
+                ui.set_width(width - 48.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let half = (width - 48.0 - 8.0) / 2.0;
+                    let install = Btn::new(tr("Install", "Nainstalovat")).accent().width(half).enabled(self.deps_accept && !self.deps_installing);
+                    if install.show(ui, &p).clicked() {
+                        acts.push(Action::InstallDeps);
+                    }
+                    let close = if self.deps_installing { tr("Close", "Zavřít") } else { tr("Not now", "Teď ne") };
+                    if Btn::new(close).width(half).show(ui, &p).clicked() {
+                        acts.push(Action::CloseDeps);
+                    }
+                });
+            });
+        });
+        if modal.should_close() && !self.deps_installing {
+            acts.push(Action::CloseDeps);
+        }
+    }
+
     fn drop_overlay(&self, ctx: &egui::Context) {
         if !ctx.input(|i| !i.raw.hovered_files.is_empty()) || self.run.is_some() || self.editor.is_some() {
             return;
@@ -939,6 +1030,7 @@ impl HeMiPixApp {
                 },
                 Action::About(on) => self.about = on,
                 Action::Open(t) => shell_open(&t),
+                Action::Launcher => crate::launcher::open(),
                 Action::OpenLicences => {
                     let file = std::env::temp_dir().join("HeMiPix-ThirdPartyNotices.txt");
                     match std::fs::write(&file, include_str!("../assets/ThirdPartyNotices.txt")) {
@@ -948,6 +1040,33 @@ impl HeMiPixApp {
                 }
                 Action::DismissToast => self.toast = None,
                 Action::DismissCodec => self.no_codec = false,
+                Action::ShowDeps => {
+                    self.deps = Some(Missing { heif: true, hevc: true });
+                    self.check_deps(ctx);
+                }
+                Action::InstallDeps => {
+                    if let Some(m) = self.deps {
+                        self.deps_installing = true;
+                        let (tx, ctx) = (self.deps_tx.clone(), ctx.clone());
+                        std::thread::spawn(move || {
+                            deps::install(m);
+                            // the Store installs in the background: looked again for two minutes
+                            for _ in 0..24 {
+                                let now = deps::check();
+                                let _ = tx.send(now);
+                                ctx.request_repaint();
+                                if !now.any() {
+                                    break;
+                                }
+                                std::thread::sleep(Duration::from_secs(5));
+                            }
+                        });
+                    }
+                }
+                Action::CloseDeps => {
+                    self.deps = None;
+                    self.deps_installing = false;
+                }
                 Action::Crop(i) => self.open_editor(ctx, i),
                 Action::CropApply(next) => {
                     if let Some(ed) = self.editor.take()
@@ -1055,6 +1174,7 @@ impl eframe::App for HeMiPixApp {
                 .show(ui, |ui| self.list(ui, &mut acts));
         }
         self.drop_overlay(&ctx);
+        self.deps_dialog(&ctx, &mut acts);
         self.act(&ctx, acts);
     }
 

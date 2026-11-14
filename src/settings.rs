@@ -48,10 +48,18 @@ impl Default for Settings {
     }
 }
 
+/// %AppData%\HeMi\HeMiPix\settings.ini – the settings of all HeMi apps are under %AppData%\HeMi; the folder of the older
+/// versions (%AppData%\HeMiPix) is moved there the first time.
 fn file() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("HeMiPix").join("settings.ini"))
+    let roaming = PathBuf::from(std::env::var_os("APPDATA")?);
+    let dir = roaming.join("HeMi").join("HeMiPix");
+    let old = roaming.join("HeMiPix");
+    if !dir.exists() && old.is_dir() {
+        let _ = std::fs::create_dir_all(roaming.join("HeMi"));
+        let _ = std::fs::rename(&old, &dir);
+    }
+    Some(dir.join("settings.ini"))
 }
-
 impl Settings {
     pub fn options(&self) -> Options {
         Options { format: self.format, quality: self.quality, keep_exif: self.keep_exif, remove_gps: self.remove_gps }

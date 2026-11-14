@@ -319,3 +319,22 @@ pub fn progress(ui: &mut egui::Ui, p: &Palette, done: f32, width: f32) {
         painter.rect_filled(egui::Rect::from_min_size(rect.min, vec2(w, rect.height())), 2, p.accent);
     }
 }
+
+/// A CheckBox of WinUI: a rounded square, in the accent colour with a check when on, and its text. Returns its response.
+pub fn checkbox(ui: &mut egui::Ui, p: &Palette, on: bool, text: &str) -> egui::Response {
+    let galley = ui.painter().layout(text.to_string(), theme::body(14.0), p.text, ui.available_width() - 32.0);
+    let h = galley.size().y.max(20.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(28.0 + galley.size().x, h), Sense::click());
+    let boxr = egui::Rect::from_min_size(pos2(rect.left(), rect.top() + (h - 20.0).min(2.0)), vec2(20.0, 20.0));
+    let hover = resp.hovered();
+    let painter = ui.painter();
+    if on {
+        painter.rect_filled(boxr, 4, if hover { p.accent_hover } else { p.accent });
+        painter.text(boxr.center(), Align2::CENTER_CENTER, glyph::CHECK, theme::icon(12.0), p.on_accent);
+    } else {
+        painter.rect_filled(boxr, 4, if hover { p.subtle_hover } else { p.control });
+        painter.rect_stroke(boxr, 4, Stroke::new(1.0, p.text2), StrokeKind::Inside);
+    }
+    painter.galley(pos2(rect.left() + 28.0, rect.top()), galley, p.text);
+    resp
+}

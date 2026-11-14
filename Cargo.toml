@@ -1,6 +1,6 @@
 [package]
 name = "hemipix"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "HeMiPix – converts photos (HEIC, PNG, WebP …) to JPG, PNG, WebP or TIFF in batches, smaller and cropped if wanted"
 authors = ["Richard Hemala"]
