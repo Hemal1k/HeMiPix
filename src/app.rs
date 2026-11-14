@@ -423,7 +423,7 @@ impl HeMiPixApp {
                 ui.add_space(4.0);
             }
             let title = if self.about {
-                tr("About", "O aplikaci")
+                tr("Settings", "Nastavení")
             } else if self.editor.is_some() {
                 tr("Crop", "Oříznout")
             } else {
@@ -452,7 +452,7 @@ impl HeMiPixApp {
                         }
                     });
                 } else if !self.about
-                    && Btn::new("").icon(glyph::INFO).subtle().tip(tr("About", "O aplikaci")).show(ui, &p).clicked()
+                    && Btn::new("").icon(glyph::SETTINGS).subtle().tip(tr("Settings", "Nastavení")).show(ui, &p).clicked()
                 {
                     acts.push(Action::About(true));
                 }
@@ -462,8 +462,29 @@ impl HeMiPixApp {
 
     fn about_page(&self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
-        section(ui, &p, "HeMiPix");
-        ui.spacing_mut().item_spacing.y = 4.0;
+        // what is set once (the switch was at the bottom of the window): the item in the menu of File Explorer
+        section(ui, &p, tr("File Explorer", "Průzkumník"));
+        card(ui, &p, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_height(52.0);
+                let w = ui.available_width() - 150.0;
+                ui.vertical(|ui| {
+                    ui.set_max_width(w);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(RichText::new(tr("Context menu", "Kontextová nabídka")).size(14.0).color(p.text));
+                    let detail = tr("“Convert with HeMiPix” in the right-click menu of HEIC photos and folders (in Windows 11 under “Show more options”).", "„Převést v HeMiPixu“ v nabídce po kliknutí pravým tlačítkem na fotku HEIC nebo složku (ve Windows 11 pod „Zobrazit další možnosti“).");
+                    ui.add(egui::Label::new(RichText::new(detail).size(12.0).color(p.text2)).wrap());
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new(if self.menu_on { tr("On", "Zapnuto") } else { tr("Off", "Vypnuto") }).size(14.0).color(p.text));
+                    if toggle(ui, &p, self.menu_on).clicked() {
+                        acts.push(Action::ToggleMenu);
+                    }
+                });
+            });
+        });
+        ui.add_space(14.0);
+        section(ui, &p, tr("About", "O aplikaci"));        ui.spacing_mut().item_spacing.y = 4.0;
         let value = |ui: &mut egui::Ui, label: &str, value: &str| {
             card(ui, &p, |ui| {
                 row_layout(ui, 44.0, |ui| {
@@ -477,27 +498,25 @@ impl HeMiPixApp {
         value(ui, tr("Author", "Autor"), "Richard Hemala");
         value(ui, tr("Version", "Verze"), &format!("Beta {}", env!("CARGO_PKG_VERSION")));
         value(ui, tr("Build date", "Datum sestavení"), &i18n::build_date());
-        // as the About page of HeMiDock: a title and the button, no descriptions
-        let open = |ui: &mut egui::Ui, title: &str, tip: &str, act: Action, acts: &mut Vec<Action>| {
-            card(ui, &p, |ui| {
-                row_layout(ui, 44.0, |ui| {
-                    ui.label(RichText::new(title).size(14.0).color(p.text));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if Btn::new(tr("Open", "Otevřít")).tip(tip).show(ui, &p).clicked() {
-                            acts.push(act);
-                        }
-                    });
-                });
-            });
-        };
-        open(ui, tr("Project on GitHub", "Projekt na GitHubu"), PROJECT, Action::Open(format!("https://{PROJECT}")), acts);
-        open(ui, tr("What's new", "Co je nového"), RELEASES, Action::Open(format!("https://{RELEASES}")), acts);
+        // the links side by side in one card (they wrap when the window is narrow)
+        let mut links: Vec<(&str, &str, Action)> = vec![
+            (tr("Project on GitHub", "Projekt na GitHubu"), PROJECT, Action::Open(format!("https://{PROJECT}"))),
+            (tr("What's new", "Co je nového"), RELEASES, Action::Open(format!("https://{RELEASES}"))),
+            (tr("Report a problem", "Nahlásit problém"), CONTACT, Action::Open(format!("https://{CONTACT}"))),
+            (tr("Licences", "Licence"), "", Action::OpenLicences),
+        ];
         // HeMi Launcher on this PC: the updates are its job
         if crate::launcher::exe().is_some() {
-            open(ui, tr("Updates in HeMi Launcher", "Aktualizace v HeMi Launcheru"), "HeMi Launcher", Action::Launcher, acts);
+            links.insert(2, ("HeMi Launcher", tr("Updates", "Aktualizace"), Action::Launcher));
         }
-        open(ui, tr("Report a problem", "Nahlásit problém"), CONTACT, Action::Open(format!("https://{CONTACT}")), acts);
-        open(ui, tr("Licences", "Licence"), "", Action::OpenLicences, acts);
+        ui.add_space(10.0);
+        section(ui, &p, tr("Links", "Odkazy"));
+        let items: Vec<(&str, &str)> = links.iter().map(|(t, tip, _)| (*t, *tip)).collect();
+        if let Some(i) = card(ui, &p, |ui| crate::widgets::button_row(ui, &p, &items))
+            && let Some((_, _, act)) = links.into_iter().nth(i)
+        {
+            acts.push(act);
+        }
     }
     fn list(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
@@ -836,15 +855,6 @@ impl HeMiPixApp {
         }
         ui.horizontal(|ui| {
             ui.set_min_height(32.0);
-            let tip = tr(
-                "Adds “Convert with HeMiPix” to the right-click menu of HEIC photos and folders. In Windows 11 it is under “Show more options”.",
-                "Přidá „Převést v HeMiPixu“ do nabídky po kliknutí pravým tlačítkem na fotku HEIC nebo složku. Ve Windows 11 je pod „Zobrazit další možnosti“.",
-            );
-            if toggle(ui, &p, self.menu_on).on_hover_text(tip).clicked() {
-                acts.push(Action::ToggleMenu);
-            }
-            ui.add_space(4.0);
-            ui.label(RichText::new(tr("File Explorer context menu", "Kontextová nabídka Průzkumníka")).size(13.0).color(p.text)).on_hover_text(tip);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if self.run.is_some() {
                     if Btn::new(tr("Stop", "Zastavit")).icon(glyph::STOP).show(ui, &p).clicked() {

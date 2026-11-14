@@ -1,5 +1,4 @@
 //! The controls of HeMiDock (WinUI 3) painted in egui – the same as in HeMiUnlocker and HeMiPad.
-#![allow(dead_code)]
 
 use crate::theme::{self, Palette, glyph};
 use eframe::egui::{self, Align, Align2, Color32, Layout, Margin, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
@@ -337,4 +336,40 @@ pub fn checkbox(ui: &mut egui::Ui, p: &Palette, on: bool, text: &str) -> egui::R
     }
     painter.galley(pos2(rect.left() + 28.0, rect.top()), galley, p.text);
     resp
+}
+/// Buttons of the same width side by side, filling the row (the links of About); in a narrow window two or more rows.
+/// Returns the index of the clicked one.
+pub fn button_row(ui: &mut egui::Ui, p: &Palette, items: &[(&str, &str)]) -> Option<usize> {
+    let gap = 8.0;
+    let w = ui.available_width();
+    let mut cols = items.len().max(1);
+    // as many in a row as fit with the longest text whole
+    let longest = items
+        .iter()
+        .map(|(t, _)| ui.painter().layout_no_wrap(t.to_string(), crate::theme::body(14.0), p.text).size().x)
+        .fold(0.0_f32, f32::max);
+    while cols > 1 && (w - gap * (cols - 1) as f32) / cols as f32 <= longest + 28.0 {
+        cols -= 1;
+    }
+    // the rows as even as they can be (5 in 3 + 2, not 4 + 1)
+    let rows = items.len().div_ceil(cols.max(1));
+    let cols = items.len().div_ceil(rows.max(1)).max(1);
+    let bw = (w - gap * (cols - 1) as f32) / cols as f32;
+    let mut clicked = None;
+    for (r, chunk) in items.chunks(cols).enumerate() {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (c, (text, tip)) in chunk.iter().enumerate() {
+                let b = Btn::new(text).width(bw);
+                let b = if tip.is_empty() { b } else { b.tip(tip) };
+                if b.show(ui, p).clicked() {
+                    clicked = Some(r * cols + c);
+                }
+            }
+        });
+        if r + 1 < items.len().div_ceil(cols) {
+            ui.add_space(gap);
+        }
+    }
+    clicked
 }

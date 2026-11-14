@@ -33,14 +33,14 @@ Extensions** from the Microsoft Store (most PCs have them; the installer – and
 - **Crop** any photo of the list: a preview with a frame to drag by its corners and edges or to move, free or in a
   fixed shape (1:1, 4:3, 3:2, 16:9 – turned for upright photos), the size in pixels shown; ‹ › go through the photos.
 - **Upright**: photos come out turned the right way, also JPGs with an Exif orientation.
-- **Metadata** (Exif: date taken, camera, location) is kept in JPG, PNG and WebP – or kept **without the location**;
+- **Metadata** (Exif: date taken, camera, location) is kept in JPG, PNG and WebP – or kept **without the location**, or removed (one choice);
   the colour profile (Display P3 of iPhones) stays too; the file date of the original stays, so the photos sort as
   before.
 - **Where to**: next to the photos, into a folder named by the format (“JPG”, “PNG” …) beside them, or into one chosen
   folder; an existing file gets a number, is replaced or the photo is skipped. From a folder, the files that already
   are of the chosen format are left out.
 - **Mica** of Windows 11 behind the window, light and dark as Windows (or HeMiDock).
-- **File Explorer item** “Convert with HeMiPix” for HEIC photos and folders – a switch in the window, off by default,
+- **File Explorer item** “Convert with HeMiPix” for HEIC photos and folders – a switch in Settings (the gear), off by default,
   written only for the current user.
 
 Its settings are in `%AppData%\HeMi\HeMiPix\settings.ini`.
