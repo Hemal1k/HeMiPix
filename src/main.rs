@@ -8,6 +8,7 @@ mod crop;
 mod deps;
 mod i18n;
 mod launcher;
+mod look;
 mod inbox;
 mod info;
 mod settings;

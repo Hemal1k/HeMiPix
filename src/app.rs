@@ -59,6 +59,8 @@ struct Toast {
 }
 
 enum Action {
+    /// The theme or the language changed.
+    SetLook(crate::look::Look),
     AddFiles,
     AddFolder,
     Remove(usize),
@@ -102,6 +104,8 @@ pub struct HeMiPixApp {
     theme_checked: Instant,
     inbox_checked: Instant,
     hwnd: isize,
+    /// The theme and the language chosen in the settings.
+    look: crate::look::Look,
     menu_on: bool,
     about: bool,
     toast: Option<Toast>,
@@ -121,7 +125,9 @@ pub struct HeMiPixApp {
 
 impl HeMiPixApp {
     pub fn new(cc: &eframe::CreationContext<'_>, paths: Vec<PathBuf>) -> Self {
-        let source = theme::read_source();
+        let look = crate::look::Look::load();
+        crate::i18n::set(look.language);
+        let source = theme::read_source(look.theme);
         let p = theme::palette(&source);
         theme::install_fonts(&cc.egui_ctx);
         theme::apply(&cc.egui_ctx, &p);
@@ -149,6 +155,7 @@ impl HeMiPixApp {
             theme_checked: Instant::now(),
             inbox_checked: Instant::now(),
             hwnd,
+            look,
             menu_on: crate::shell_menu::is_on(),
             about: false,
             toast: None,
@@ -381,7 +388,7 @@ impl HeMiPixApp {
             return;
         }
         self.theme_checked = Instant::now();
-        let source = theme::read_source();
+        let source = theme::read_source(self.look.theme);
         if source != self.source {
             self.source = source;
             self.p = theme::palette(&source);
@@ -463,18 +470,33 @@ impl HeMiPixApp {
     fn about_page(&self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         // what is set once (the switch was at the bottom of the window): the item in the menu of File Explorer
-        section(ui, &p, tr("File Explorer", "Průzkumník"));
-        card(ui, &p, |ui| {
-            ui.horizontal(|ui| {
-                ui.set_min_height(52.0);
-                let w = ui.available_width() - 150.0;
-                ui.vertical(|ui| {
-                    ui.set_max_width(w);
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(RichText::new(tr("Context menu", "Kontextová nabídka")).size(14.0).color(p.text));
-                    let detail = tr("“Convert with HeMiPix” in the right-click menu of HEIC photos and folders (in Windows 11 under “Show more options”).", "„Převést v HeMiPixu“ v nabídce po kliknutí pravým tlačítkem na fotku HEIC nebo složku (ve Windows 11 pod „Zobrazit další možnosti“).");
-                    ui.add(egui::Label::new(RichText::new(detail).size(12.0).color(p.text2)).wrap());
+        // the same at the top of every HeMi app: theme and language
+        section(ui, &p, tr("Appearance", "Vzhled"));
+        for (title, current, items, which) in [
+            (tr("Theme", "Motiv"), self.look.theme, [tr("Automatic", "Automaticky"), tr("Light", "Světlý"), tr("Dark", "Tmavý")], 0),
+            (tr("Language", "Jazyk"), self.look.language, [tr("Automatic", "Automaticky"), "English", "Čeština"], 1),
+        ] {
+            card(ui, &p, |ui| {
+                row_layout(ui, 44.0, |ui| {
+                    ui.label(RichText::new(title).size(14.0).color(p.text));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if let Some(i) = crate::widgets::dropdown(ui, &p, current as usize, &items, 220.0) {
+                            let mut l = self.look;
+                            if which == 0 {
+                                l.theme = i as u8;
+                            } else {
+                                l.language = i as u8;
+                            }
+                            acts.push(Action::SetLook(l));
+                        }
+                    });
                 });
+            });
+        }
+        ui.add_space(14.0);        section(ui, &p, tr("File Explorer", "Průzkumník"));
+        card(ui, &p, |ui| {
+            row_layout(ui, 44.0, |ui| {
+                ui.label(RichText::new(tr("Context menu", "Kontextová nabídka")).size(14.0).color(p.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(RichText::new(if self.menu_on { tr("On", "Zapnuto") } else { tr("Off", "Vypnuto") }).size(14.0).color(p.text));
                     if toggle(ui, &p, self.menu_on).clicked() {
@@ -482,8 +504,7 @@ impl HeMiPixApp {
                     }
                 });
             });
-        });
-        ui.add_space(14.0);
+        });        ui.add_space(14.0);
         section(ui, &p, tr("About", "O aplikaci"));        ui.spacing_mut().item_spacing.y = 4.0;
         let value = |ui: &mut egui::Ui, label: &str, value: &str| {
             card(ui, &p, |ui| {
@@ -497,7 +518,6 @@ impl HeMiPixApp {
         };
         value(ui, tr("Author", "Autor"), "Richard Hemala");
         value(ui, tr("Version", "Verze"), &format!("Beta {}", env!("CARGO_PKG_VERSION")));
-        value(ui, tr("Build date", "Datum sestavení"), &i18n::build_date());
         // the links side by side in one card (they wrap when the window is narrow)
         let mut links: Vec<(&str, &str, Action)> = vec![
             (tr("Project on GitHub", "Projekt na GitHubu"), PROJECT, Action::Open(format!("https://{PROJECT}"))),
@@ -996,6 +1016,13 @@ impl HeMiPixApp {
     fn act(&mut self, ctx: &egui::Context, acts: Vec<Action>) {
         for a in acts {
             match a {
+                Action::SetLook(l) => {
+                    l.save();
+                    crate::i18n::set(l.language);
+                    self.look = l;
+                    // the new colours at once, not after the next look at the theme
+                    self.theme_checked = Instant::now().checked_sub(Duration::from_secs(5)).unwrap_or_else(Instant::now);
+                }
                 Action::AddFiles => {
                     if let Some(f) = self.pick_files() {
                         self.add(f);
