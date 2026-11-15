@@ -18,7 +18,7 @@
 AppId=HeMiPix
 AppName=HeMiPix
 AppVersion={#AppVersion}
-AppVerName=HeMiPix Beta {#AppVersion}
+AppVerName=HeMiPix {#AppVersion}
 AppPublisher=Richard Hemala
 AppPublisherURL=https://github.com/Hemal1k/HeMiPix
 AppSupportURL=https://github.com/Hemal1k/HeMiPix/issues
