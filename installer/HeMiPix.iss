@@ -73,6 +73,11 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.heic\shell\HeMiPix
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.heif\shell\HeMiPix"; Flags: uninsdeletekey dontcreatekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.hif\shell\HeMiPix"; Flags: uninsdeletekey dontcreatekey
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\HeMiPix"; Flags: uninsdeletekey dontcreatekey
+; what Windows itself keeps about the app (its name in menus, "Open with")
+Root: HKCU; Subkey: "Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"; ValueType: none; ValueName: "{app}\HeMiPix.exe.FriendlyAppName"; Flags: uninsdeletevalue dontcreatekey
+Root: HKCU; Subkey: "Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"; ValueType: none; ValueName: "{app}\HeMiPix.exe.ApplicationCompany"; Flags: uninsdeletevalue dontcreatekey
+Root: HKCU; Subkey: "Software\Classes\Applications\HeMiPix.exe"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\HeMi"; Flags: uninsdeletekeyifempty dontcreatekey
 
 [CustomMessages]
 ExtTitle=Photo extensions from Microsoft

@@ -424,7 +424,7 @@ impl HeMiPixApp {
             let back = self.about || self.editor.is_some();
             if back {
                 let act = if self.editor.is_some() { Action::CropClose } else { Action::About(false) };
-                if Btn::new("").icon(glyph::BACK).subtle().tip(tr("Back", "Zpět")).show(ui, &p).clicked() {
+                if Btn::new("").icon(glyph::BACK).subtle().show(ui, &p).clicked() {
                     acts.push(act);
                 }
                 ui.add_space(4.0);
@@ -459,7 +459,7 @@ impl HeMiPixApp {
                         }
                     });
                 } else if !self.about
-                    && Btn::new("").icon(glyph::SETTINGS).subtle().tip(tr("Settings", "Nastavení")).show(ui, &p).clicked()
+                    && Btn::new("").icon(glyph::SETTINGS).subtle().show(ui, &p).clicked()
                 {
                     acts.push(Action::About(true));
                 }
