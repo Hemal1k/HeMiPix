@@ -23,7 +23,8 @@ AppPublisher=Richard Hemala
 AppPublisherURL=https://github.com/Hemal1k/HeMiPix
 AppSupportURL=https://github.com/Hemal1k/HeMiPix/issues
 AppUpdatesURL=https://github.com/Hemal1k/HeMiPix/releases
-DefaultDirName={autopf}\HeMiPix
+DefaultDirName={autopf}\HeMi\HeMiPix
+UsePreviousAppDir=no
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
@@ -65,6 +66,8 @@ Name: "{autoprograms}\HeMiPix"; Filename: "{app}\HeMiPix.exe"
 Name: "{autodesktop}\HeMiPix"; Filename: "{app}\HeMiPix.exe"; Tasks: desktopicon
 
 [Run]
+; the File Explorer items and the start with Windows point to this installation (also after a move from the old folder)
+Filename: "{app}\HeMiPix.exe"; Parameters: "--repair"; Flags: runasoriginaluser waituntilterminated runhidden
 Filename: "{app}\HeMiPix.exe"; Description: "{cm:LaunchProgram,HeMiPix}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Registry]
@@ -87,6 +90,47 @@ ExtLicense=license terms
 ExtAccept=I accept the license terms and want them installed
 
 [Code]
+// Since 2026-11 the HeMi apps go into one folder HeMi, as their settings do (%AppData%\HeMi\<app>): {autopf}\HeMi\HeMiPix.
+// An installation in the old folder {autopf}\HeMiPix moves: the app running from there ends, the new version goes into the
+// new folder ("--repair" points the File Explorer items and the start with Windows to it) and the old folder is deleted.
+var
+  OldFolder: String;
+
+function FindOldFolder: String;
+begin
+  if RegQueryStringValue(HKA, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\HeMiPix_is1', 'InstallLocation', Result) then
+  begin
+    Result := RemoveBackslashUnlessRoot(Result);
+    if (CompareText(Result, ExpandConstant('{app}')) = 0) or (CompareText(ExtractFileName(Result), 'HeMiPix') <> 0)
+      or not FileExists(Result + '\HeMiPix.exe') then
+      Result := '';
+  end
+  else
+    Result := '';
+end;
+
+procedure StopOld;
+var
+  Code: Integer;
+begin
+  OldFolder := FindOldFolder;
+  if OldFolder = '' then Exit;
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "Get-Process | Where-Object { $_.Path -like ''' + OldFolder + '\*'' } | Stop-Process -Force"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+procedure DeleteOld;
+begin
+  if OldFolder <> '' then DelTree(OldFolder, True, True, True);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  StopOld;
+end;
+
 const
   HeifId = '9PMMSR1CGPWG';
   HevcId = '9N4WGH0Z6VHQ';
@@ -175,6 +219,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
 begin
+  if CurStep = ssPostInstall then DeleteOld;
   if (CurStep <> ssPostInstall) or WizardSilent or not ExtAccept.Checked then Exit;
   if NeedHeif then
     ExecAsOriginalUser('winget.exe', 'install --id ' + HeifId + ' --source msstore --silent --accept-package-agreements --accept-source-agreements',

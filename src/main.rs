@@ -20,6 +20,11 @@ use eframe::egui;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result {
+    // the installer after an installation or a move to another folder: the File Explorer item points to this exe
+    if std::env::args().nth(1).as_deref() == Some("--repair") {
+        shell_menu::repair();
+        return Ok(());
+    }
     // photos / folders given on the command line (also the way the File Explorer item starts it)
     let paths: Vec<PathBuf> = std::env::args_os()
         .skip(1)
