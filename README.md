@@ -17,8 +17,8 @@ photo with a frame you drag. In the look of Windows 11, and it never goes online
 | File | For |
 |---|---|
 | `HeMiPix-Setup.exe` | The installer – just for you (no administrator) or for all users (Program Files), x64 or ARM64, with a Start menu entry, an optional desktop shortcut and an uninstaller. |
-| `HeMiPix-Portable.zip` | Just the program for x64; run it from any folder. |
-| `HeMiPix-Portable-arm64.zip` | The same for Windows on ARM. |
+| `HeMiPix-Portable.exe` | Just the program for x64; run it from any folder. |
+| `HeMiPix-Portable-arm64.exe` | The same for Windows on ARM. |
 
 Windows 10 / 11, x64 and ARM64. HEIC is read by Windows itself: it needs the free **HEIF Image Extensions** and **HEVC Video
 Extensions** from the Microsoft Store (most PCs have them; the installer – and the portable version itself – offers to install them when they are missing).
