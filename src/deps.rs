@@ -1,6 +1,6 @@
 //! The two free extensions of the Microsoft Store that let Windows read HEIC: checked at the start (also the portable
-//! HeMiPix), and – after the user accepts their license terms – installed by their install windows of the Microsoft
-//! Store (HEIF Image Extensions and the free HEVC Video Extensions).
+//! HeMiPix), and – after the user accepts their license terms – installed: HEIF Image Extensions by winget, the free
+//! HEVC Video Extensions (not in winget) by its install window of the Microsoft Store.
 
 use std::os::windows::process::CommandExt;
 use std::process::Command;
@@ -41,14 +41,24 @@ pub fn check() -> Missing {
     Missing { heif: !heif, hevc: !hevc }
 }
 
-/// Opens the install window of the Microsoft Store for what is missing (the Store installs it in the background).
-pub fn install(m: Missing) {
+/// Installs what is missing; true when winget took the HEIF extension (or it was not needed).
+pub fn install(m: Missing) -> bool {
+    let mut ok = true;
     if m.heif {
-        open("ms-windows-store://pdp/?ProductId=9PMMSR1CGPWG&mode=mini");
+        ok = Command::new("winget.exe")
+            .args(["install", "--id", "9PMMSR1CGPWG", "--source", "msstore", "--silent", "--accept-package-agreements", "--accept-source-agreements"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            // no winget (older Windows 10): the page of the store instead
+            open("ms-windows-store://pdp/?ProductId=9PMMSR1CGPWG&mode=mini");
+        }
     }
     if m.hevc {
         open("ms-windows-store://pdp/?ProductId=9N4WGH0Z6VHQ&mode=mini");
     }
+    ok
 }
 
 pub fn open(target: &str) {

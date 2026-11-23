@@ -217,7 +217,7 @@ begin
   Result := (PageID = ExtPage.ID) and not (NeedHeif or NeedHevc);
 end;
 
-{ after the installation, as the user (the extensions are installed for the user): both by their install windows of the Microsoft Store }
+{ after the installation, as the user (the extensions are installed for the user): HEIF by winget, HEVC by its store page }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
@@ -225,7 +225,8 @@ begin
   if CurStep = ssPostInstall then DeleteOld;
   if (CurStep <> ssPostInstall) or WizardSilent or not ExtAccept.Checked then Exit;
   if NeedHeif then
-    ShellExecAsOriginalUser('open', 'ms-windows-store://pdp/?ProductId=' + HeifId + '&mode=mini', '', '', SW_SHOWNORMAL, ewNoWait, Code);
+    ExecAsOriginalUser('winget.exe', 'install --id ' + HeifId + ' --source msstore --silent --accept-package-agreements --accept-source-agreements',
+      '', SW_HIDE, ewWaitUntilTerminated, Code);
   if NeedHevc then
     ShellExecAsOriginalUser('open', 'ms-windows-store://pdp/?ProductId=' + HevcId + '&mode=mini', '', '', SW_SHOWNORMAL, ewNoWait, Code);
 end;
