@@ -36,3 +36,13 @@ pub fn tr<'a>(en: &'a str, cs: &'a str) -> &'a str {
     if cz() { cs } else { en }
 }
 
+/// The form of a word for a count, by the Czech rule: `one` for 1, `few` for 2–4, `many` for 0 and 5 and more
+/// ("1 fotka", "3 fotky", "5 fotek"). For English pass the plural as both `few` and `many` ("1 photo", "2 photos").
+pub fn plural<'a>(n: usize, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
+    match n {
+        1 => one,
+        2..=4 => few,
+        _ => many,
+    }
+}
+

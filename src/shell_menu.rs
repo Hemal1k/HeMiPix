@@ -57,12 +57,12 @@ fn write(key: &str, name: Option<&str>, value: &str) -> Result<(), String> {
         let mut hkey: HKEY = null_mut();
         let r = RegCreateKeyExW(HKEY_CURRENT_USER, k.as_ptr(), 0, null(), 0, KEY_WRITE, null(), &mut hkey, null_mut());
         if r != ERROR_SUCCESS {
-            return Err(format!("{} ({r}).", tr("Writing to the registry failed", "Zápis do registru se nepodařil – chyba")));
+            return Err(tr("Writing to the registry failed (error {r}).", "Zápis do registru se nepodařil (chyba {r}).").replace("{r}", &r.to_string()));
         }
         let r = RegSetValueExW(hkey, n.as_ref().map_or(null(), |n| n.as_ptr()), 0, REG_SZ, v.as_ptr() as *const u8, (v.len() * 2) as u32);
         RegCloseKey(hkey);
         if r != ERROR_SUCCESS {
-            return Err(format!("{} ({r}).", tr("Writing to the registry failed", "Zápis do registru se nepodařil – chyba")));
+            return Err(tr("Writing to the registry failed (error {r}).", "Zápis do registru se nepodařil (chyba {r}).").replace("{r}", &r.to_string()));
         }
     }
     Ok(())
@@ -87,7 +87,7 @@ pub fn set(on: bool) -> Result<(), String> {
             let k = wide(key);
             let r = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, k.as_ptr()) };
             if r != ERROR_SUCCESS && r != ERROR_FILE_NOT_FOUND {
-                return Err(format!("{} ({r}).", tr("The item could not be removed", "Položku se nepodařilo odebrat – chyba")));
+                return Err(tr("The item could not be removed (error {r}).", "Položku se nepodařilo odebrat (chyba {r}).").replace("{r}", &r.to_string()));
             }
             let _ = unsafe { windows_sys::Win32::System::Registry::RegDeleteKeyW(HKEY_CURRENT_USER, k.as_ptr()) };
         }

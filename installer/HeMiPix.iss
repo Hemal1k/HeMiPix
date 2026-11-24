@@ -46,10 +46,13 @@ WizardStyle=modern dynamic windows11
 WizardSizePercent=120
 CloseApplications=force
 LicenseFile=..\LICENSE
+; the language of Windows (English or Czech), the question only when it is another one
+ShowLanguageDialog=auto
 
 [Languages]
-; English only
+; English, and Czech on Czech Windows (as the app)
 Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "cs"; MessagesFile: "compiler:Languages\Czech.isl"
 
 [Files]
 ; x64, and the ARM64 program on Windows on ARM when the installer has it
@@ -69,7 +72,7 @@ Name: "{autoprograms}\HeMiPix"; Filename: "{app}\HeMiPix.exe"
 Name: "{autodesktop}\HeMiPix"; Filename: "{app}\HeMiPix.exe"; Tasks: desktopicon
 
 [Run]
-; the File Explorer items and the start with Windows point to this installation (also after a move from the old folder)
+; the File Explorer items point to this installation (also after a move from the old folder)
 Filename: "{app}\HeMiPix.exe"; Parameters: "--repair"; Flags: runasoriginaluser waituntilterminated runhidden
 Filename: "{app}\HeMiPix.exe"; Description: "{cm:LaunchProgram,HeMiPix}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
@@ -86,16 +89,23 @@ Root: HKCU; Subkey: "Software\Classes\Applications\HeMiPix.exe"; Flags: uninsdel
 Root: HKCU; Subkey: "Software\HeMi"; Flags: uninsdeletekeyifempty dontcreatekey
 
 [CustomMessages]
-ExtTitle=Photo extensions from Microsoft
-ExtDesc=HEIC photos are read by Windows itself, with two free extensions.
-ExtText=These are missing on this PC (without them HeMiPix converts everything but HEIC). After the installation HEIF comes from the Microsoft Store and the store page of HEVC opens. Their license terms:
-ExtLicense=license terms
-ExtAccept=I accept the license terms and want them installed
+en.ExtTitle=Photo extensions from Microsoft
+en.ExtDesc=HEIC photos are read by Windows itself, with two free extensions.
+en.ExtText=These are missing on this PC (without them HeMiPix converts everything but HEIC). After the installation HEIF is installed by winget from the Microsoft Store, and the Microsoft Store page of HEVC opens. Their license terms:
+en.ExtLicense=license terms
+en.ExtAccept=I accept the license terms and want them installed
+en.DeleteSettings=Delete the settings of HeMiPix too?%n%nKeep them to use them again when you install HeMiPix later.
+cs.ExtTitle=Rozšíření fotek od Microsoftu
+cs.ExtDesc=Fotky HEIC čte samotný Windows pomocí dvou bezplatných rozšíření.
+cs.ExtText=V tomto počítači chybí (bez nich HeMiPix převede vše kromě HEIC). Po instalaci se HEIF nainstaluje pomocí wingetu z Microsoft Storu a otevře se stránka HEVC v Microsoft Storu. Jejich licenční podmínky:
+cs.ExtLicense=licenční podmínky
+cs.ExtAccept=Souhlasím s licenčními podmínkami a chci je nainstalovat
+cs.DeleteSettings=Smazat i nastavení HeMiPixu?%n%nKdyž ho necháš, použije se znovu, až HeMiPix nainstaluješ příště.
 
 [Code]
 // Since 2026-11 the HeMi apps go into one folder HeMi, as their settings do (%AppData%\HeMi\<app>): {autopf}\HeMi\HeMiPix.
 // An installation in the old folder {autopf}\HeMiPix moves: the app running from there ends, the new version goes into the
-// new folder ("--repair" points the File Explorer items and the start with Windows to it) and the old folder is deleted.
+// new folder ("--repair" points the File Explorer items to it) and the old folder is deleted.
 var
   OldFolder: String;
 
@@ -150,7 +160,8 @@ function HasAppx(const Name: String): Boolean;
 var
   Code: Integer;
 begin
-  Result := Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "if (Get-AppxPackage -Name ' + Name + ') { exit 0 } else { exit 1 }"',
+  { the full path: by its name alone, Windows would look into the folder of the installer first }
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -NonInteractive -Command "if (Get-AppxPackage -Name ' + Name + ') { exit 0 } else { exit 1 }"',
     '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
 end;
 
@@ -224,9 +235,13 @@ var
 begin
   if CurStep = ssPostInstall then DeleteOld;
   if (CurStep <> ssPostInstall) or WizardSilent or not ExtAccept.Checked then Exit;
+  { winget by its full path (by its name alone, Windows would look into the folder of the installer first); without
+    winget (older Windows 10) the store page of HEIF opens instead, as in the app }
   if NeedHeif then
-    ExecAsOriginalUser('winget.exe', 'install --id ' + HeifId + ' --source msstore --silent --accept-package-agreements --accept-source-agreements',
-      '', SW_HIDE, ewWaitUntilTerminated, Code);
+    if not ExecAsOriginalUser(ExpandConstant('{localappdata}\Microsoft\WindowsApps\winget.exe'),
+      'install --id ' + HeifId + ' --source msstore --silent --accept-package-agreements --accept-source-agreements',
+      '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      ShellExecAsOriginalUser('open', 'ms-windows-store://pdp/?ProductId=' + HeifId + '&mode=mini', '', '', SW_SHOWNORMAL, ewNoWait, Code);
   if NeedHevc then
     ShellExecAsOriginalUser('open', 'ms-windows-store://pdp/?ProductId=' + HevcId + '&mode=mini', '', '', SW_SHOWNORMAL, ewNoWait, Code);
 end;
@@ -241,7 +256,7 @@ begin
   Dir := ExpandConstant('{userappdata}\HeMi\HeMiPix');
   if not DirExists(Dir) then Exit;
   if UninstallSilent then Exit;
-  if MsgBox('Delete the settings of HeMiPix too?' + #13#10#13#10 + 'Keep them to use them again when you install HeMiPix later.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+  if MsgBox(CustomMessage('DeleteSettings'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
   begin
     DelTree(Dir, True, True, True);
     RemoveDir(ExpandConstant('{userappdata}\HeMi'));

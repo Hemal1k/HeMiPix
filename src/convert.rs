@@ -205,13 +205,47 @@ fn has_alpha(factory: &IWICImagingFactory, source: &IWICBitmapSource) -> bool {
     }
 }
 
+/// The most pixels of a picture HeMiPix converts (200 MP: the photos of today's phones fit). A bigger one – often a
+/// small file that claims a huge size ("decompression bomb") – is an error of its row, not a crash of the app.
+pub const MAX_PIXELS: u64 = 200_000_000;
+/// The widest and highest picture WebP can hold (WEBP_MAX_DIMENSION of libwebp); a bigger one is made smaller.
+pub const WEBP_MAX: u32 = 16_383;
+
+/// The picture is not too big to convert (and not empty).
+fn check_size(w: u32, h: u32) -> Result<(), Fail> {
+    if w == 0 || h == 0 || u64::from(w) * u64::from(h) > MAX_PIXELS {
+        return Err(too_big());
+    }
+    Ok(())
+}
+
+fn too_big() -> Fail {
+    Fail::Msg(crate::i18n::tr("The picture is too big (at most 200 megapixels).", "Obrázek je příliš velký (nejvýš 200 megapixelů).").into())
+}
+
+/// The size of a w × h picture made smaller to fit into `max` × `max` (the same when it fits).
+pub fn fit_within(w: u32, h: u32, max: u32) -> (u32, u32) {
+    let long = w.max(h);
+    if long <= max {
+        return (w, h);
+    }
+    let scale = |v: u32| ((u64::from(v) * u64::from(max) + u64::from(long) / 2) / u64::from(long)).clamp(1, u64::from(max)) as u32;
+    (scale(w), scale(h))
+}
+
 /// The pixels of the picture in the given format (RGBA / BGRA: 4 bytes, RGB / BGR: 3 bytes per pixel).
 fn pixels(factory: &IWICImagingFactory, source: &IWICBitmapSource, format: &GUID, bytes: u32, w: u32, h: u32) -> Result<Vec<u8>, Fail> {
+    // the sizes in usize and checked: they never wrap around
+    let stride = w.checked_mul(bytes).ok_or_else(too_big)?;
+    let len = (stride as usize).checked_mul(h as usize).ok_or_else(too_big)?;
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(len)
+        .map_err(|_| Fail::Msg(crate::i18n::tr("Not enough memory for this picture.", "Na tento obrázek nestačí paměť.").into()))?;
+    buf.resize(len, 0);
     unsafe {
         let converter = factory.CreateFormatConverter()?;
         converter.Initialize(source, format, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
-        let mut buf = vec![0u8; (w * h * bytes) as usize];
-        converter.CopyPixels(std::ptr::null(), w * bytes, &mut buf)?;
+        converter.CopyPixels(std::ptr::null(), stride, &mut buf)?;
         Ok(buf)
     }
 }
@@ -274,6 +308,7 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
         }
         let (mut w, mut h) = (0u32, 0u32);
         source.GetSize(&mut w, &mut h)?;
+        check_size(w, h)?;
 
         // cropped to the rectangle chosen in the crop editor
         if let Some(c) = crop {
@@ -290,14 +325,24 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
 
         // WebP: libwebp, then the profile and the metadata put in by hand
         if o.format == Format::Webp {
+            // WebP holds at most 16 383 × 16 383 pixels: a wider panorama is made smaller to fit
+            let (nw, nh) = fit_within(w, h, WEBP_MAX);
+            if (nw, nh) != (w, h) {
+                let scaler = factory.CreateBitmapScaler()?;
+                scaler.Initialize(&source, nw, nh, WICBitmapInterpolationModeFant)?;
+                source = scaler.into();
+                (w, h) = (nw, nh);
+            }
             let quality = o.quality.clamp(1, 100) as f32;
-            let data = if alpha {
+            // encode_simple returns the error of libwebp (encode would end the app on it)
+            let encoded = if alpha {
                 let rgba = pixels(factory, &source, &GUID_WICPixelFormat32bppRGBA, 4, w, h)?;
-                webp::Encoder::from_rgba(&rgba, w, h).encode(quality).to_vec()
+                webp::Encoder::from_rgba(&rgba, w, h).encode_simple(false, quality).map(|m| m.to_vec())
             } else {
                 let rgb = pixels(factory, &source, &GUID_WICPixelFormat24bppRGB, 3, w, h)?;
-                webp::Encoder::from_rgb(&rgb, w, h).encode(quality).to_vec()
+                webp::Encoder::from_rgb(&rgb, w, h).encode_simple(false, quality).map(|m| m.to_vec())
             };
+            let data = encoded.map_err(|e| Fail::Msg(format!("WebP: {e:?}")))?;
             let icc = profile.as_ref().and_then(profile_bytes);
             std::fs::write(tmp, container::webp_with(&data, w, h, icc.as_deref(), exif))?;
             return Ok((w, h));
@@ -306,7 +351,7 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
         // JPG has no transparency: transparent parts are put on white (not black)
         if o.format == Format::Jpg && alpha {
             let bgra = pixels(factory, &source, &GUID_WICPixelFormat32bppBGRA, 4, w, h)?;
-            let mut bgr = Vec::with_capacity((w * h * 3) as usize);
+            let mut bgr = Vec::with_capacity(bgra.len() / 4 * 3);
             for p in bgra.chunks_exact(4) {
                 let a = p[3] as u32;
                 for c in &p[..3] {
@@ -330,7 +375,7 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
         let mut out: Option<IWICBitmapFrameEncode> = None;
         let mut props = None;
         encoder.CreateNewFrame(&mut out, &mut props)?;
-        let out = out.ok_or_else(|| Fail::Msg("No frame to write".into()))?;
+        let out = out.ok_or_else(|| Fail::Msg(crate::i18n::tr("Windows could not write the picture.", "Windows obrázek nedokázal zapsat.").into()))?;
         if let Some(props) = &props {
             let mut value = VARIANT::default();
             match o.format {
@@ -464,7 +509,7 @@ pub fn run(jobs: Vec<Job>, o: Options, stop: Arc<AtomicBool>, tx: Sender<Event>,
     });
 }
 
-/// Real conversions of sample photos: `HEMIPIX_SAMPLES=<folder with .heic> cargo test -- --ignored`.
+/// Real conversions of sample photos: `HEMIPIX_SAMPLES=<folder with .heic> cargo test -- --include-ignored`.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +536,21 @@ mod tests {
         assert_eq!(crop_pixels(4000, 3000, [0.125, 0.0, 0.75, 1.0]), (500, 0, 3000, 3000));
         assert_eq!(crop_pixels(100, 100, [0.9, 0.9, 0.5, 0.5]), (90, 90, 10, 10));
         assert_eq!(crop_pixels(100, 100, [0.0, 0.0, 0.0, 0.0]), (0, 0, 1, 1));
+    }
+
+    #[test]
+    fn size_limits() {
+        // a 200 MP photo of a phone passes, bigger or empty pictures are an error (never a crash)
+        assert!(check_size(16_320, 12_240).is_ok());
+        assert!(check_size(30_000, 30_000).is_err());
+        assert!(check_size(u32::MAX, u32::MAX).is_err());
+        assert!(check_size(0, 100).is_err());
+        // WebP: a panorama is made smaller to 16 383 px, the side ratio stays; smaller pictures stay as they are
+        assert_eq!(fit_within(20_000, 4_000, WEBP_MAX), (16_383, 3_277));
+        assert_eq!(fit_within(4_000, 20_000, WEBP_MAX), (3_277, 16_383));
+        assert_eq!(fit_within(16_383, 16_383, WEBP_MAX), (16_383, 16_383));
+        assert_eq!(fit_within(200_000, 1, WEBP_MAX), (16_383, 1));
+        assert_eq!(fit_within(4_000, 3_000, WEBP_MAX), (4_000, 3_000));
     }
     #[test]
     #[ignore]

@@ -220,7 +220,7 @@ fn shades(base: Color32) -> [Color32; 7] {
     [mix(base, w, 0.72), mix(base, w, 0.5), mix(base, w, 0.25), base, mix(base, b, 0.2), mix(base, b, 0.4), mix(base, b, 0.6)]
 }
 
-/// `mode`: the theme chosen in the app (0 automatic – HeMiDock, else Windows; 1 light; 2 dark).
+/// `mode`: the theme chosen in the app (0 automatic – as Windows; 1 light; 2 dark).
 pub fn read_source(mode: u8) -> Source {
     // each app has its own look (the user, 2026-11-19: the theme of HeMiDock changed HeMi Launcher too): the settings of
     // HeMiDock are not read any more – "as Windows" is the light / dark mode and the accent colour of Windows

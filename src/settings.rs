@@ -1,9 +1,9 @@
-//! What HeMiPix remembers between runs, in %AppData%\HeMiPix\settings.ini (lines "key=value").
+//! What HeMiPix remembers between runs, in %AppData%\HeMi\HeMiPix\settings.ini (lines "key=value").
 
 use crate::convert::{Format, Options};
 use std::path::PathBuf;
 
-/// Where the JPGs go.
+/// Where the new files go.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Output {
     /// Next to each photo.
@@ -14,7 +14,7 @@ pub enum Output {
     Folder,
 }
 
-/// When a JPG of the name exists already.
+/// When a file of the name exists already.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Existing {
     /// "photo (2).jpg"

@@ -1,4 +1,4 @@
-// HeMiPix – converts HEIC photos (from iPhones) to JPG in batches; smaller and cropped if wanted.
+// HeMiPix – converts photos (HEIC from iPhones, JPG, PNG, WebP, TIFF …) to JPG, PNG, WebP or TIFF in batches; smaller and cropped if wanted.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;

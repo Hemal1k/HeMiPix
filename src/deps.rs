@@ -28,8 +28,8 @@ pub fn check() -> Missing {
         return Missing { heif: true, hevc: true };
     }
     let script = "$h = [bool](Get-AppxPackage -Name Microsoft.HEIFImageExtension); $v = [bool](Get-AppxPackage -Name 'Microsoft.HEVCVideoExtension*'); \"$h $v\"";
-    let out = Command::new("powershell.exe")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+    let out = Command::new(program("powershell.exe"))
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
     let Ok(out) = out else { return Missing { heif: false, hevc: false } };
@@ -45,7 +45,7 @@ pub fn check() -> Missing {
 pub fn install(m: Missing) -> bool {
     let mut ok = true;
     if m.heif {
-        ok = Command::new("winget.exe")
+        ok = Command::new(program("winget.exe"))
             .args(["install", "--id", "9PMMSR1CGPWG", "--source", "msstore", "--silent", "--accept-package-agreements", "--accept-source-agreements"])
             .creation_flags(CREATE_NO_WINDOW)
             .status()
@@ -59,6 +59,28 @@ pub fn install(m: Missing) -> bool {
         open("ms-windows-store://pdp/?ProductId=9N4WGH0Z6VHQ&mode=mini");
     }
     ok
+}
+
+/// The full path of a program of Windows given by its name: from System32, PowerShell from its own folder there,
+/// winget from WindowsApps, explorer from the Windows folder. Never just the name: Windows would look into the folder
+/// of HeMiPix.exe first (often Downloads), where any "powershell.exe" would then run at every start.
+pub fn program(exe: &str) -> std::path::PathBuf {
+    use std::path::PathBuf;
+    let env = |name: &str, default: &str| std::env::var_os(name).map_or_else(|| PathBuf::from(default), PathBuf::from);
+    let windows = env("SystemRoot", r"C:\Windows");
+    let system = {
+        use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+        let mut buf = [0u16; 260];
+        // SAFETY: the buffer is valid for its length; the call writes at most that many characters
+        let n = unsafe { GetSystemDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n > 0 && n < buf.len() { PathBuf::from(String::from_utf16_lossy(&buf[..n])) } else { windows.join("System32") }
+    };
+    match exe.to_ascii_lowercase().as_str() {
+        "powershell.exe" => system.join(r"WindowsPowerShell\v1.0\powershell.exe"),
+        "winget.exe" => env("LOCALAPPDATA", "").join(r"Microsoft\WindowsApps\winget.exe"),
+        "explorer.exe" => windows.join("explorer.exe"),
+        _ => system.join(exe),
+    }
 }
 
 pub fn open(target: &str) {

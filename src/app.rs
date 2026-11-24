@@ -32,7 +32,7 @@ enum State {
     Waiting,
     Working,
     Done(Done),
-    /// A JPG of the name exists and the setting says skip.
+    /// A file of the name exists and the setting says skip.
     Skipped,
     Failed(String),
 }
@@ -42,7 +42,7 @@ struct Item {
     size: u64,
     state: State,
     crop: Option<CropRect>,
-    /// The JPG made last time: converted again (after a new crop) it replaces it instead of a new name.
+    /// The file made last time: converted again (after a new crop) it replaces it instead of a new name.
     last_out: Option<PathBuf>,
 }
 
@@ -200,15 +200,16 @@ impl HeMiPixApp {
         self.items.iter().filter(|i| matches!(i.state, State::Waiting | State::Failed(_))).count()
     }
 
-    /// Where each waiting photo goes, by the settings; photos whose JPG exists are skipped when asked.
+    /// Where each waiting photo goes, by the settings; photos whose new file exists are skipped when asked.
     fn plan(&mut self) -> Result<Vec<Job>, String> {
-        let mut taken: HashSet<String> = HashSet::new();
+        // the originals in the list are never a target: "Replace" must not overwrite the photo of another row
+        let mut taken: HashSet<String> = self.items.iter().map(|i| key(&i.src)).collect();
         let mut jobs = Vec::new();
         for (id, item) in self.items.iter_mut().enumerate() {
             if !matches!(item.state, State::Waiting | State::Failed(_)) {
                 continue;
             }
-            // converted before (and cropped anew since): the same JPG again
+            // converted before (and cropped anew since): the same file again
             if let Some(prev) = item.last_out.clone().filter(|p| !taken.contains(&key(p))) {
                 taken.insert(key(&prev));
                 item.state = State::Waiting;
@@ -382,7 +383,7 @@ impl HeMiPixApp {
         });
     }
 
-    /// Light / dark or the accent colour changed (in Windows or in HeMiDock): the new colours at once.
+    /// Light / dark or the accent color changed (in Windows or in the settings of the app): the new colors at once.
     fn follow_theme(&mut self, ctx: &egui::Context) {
         if self.theme_checked.elapsed() < Duration::from_secs(2) {
             return;
@@ -493,7 +494,8 @@ impl HeMiPixApp {
                 });
             });
         }
-        ui.add_space(14.0);        section(ui, &p, tr("File Explorer", "Průzkumník"));
+        ui.add_space(14.0);
+        section(ui, &p, tr("File Explorer", "Průzkumník souborů"));
         card(ui, &p, |ui| {
             row_layout(ui, 44.0, |ui| {
                 ui.label(RichText::new(tr("Context menu", "Kontextová nabídka")).size(14.0).color(p.text));
@@ -521,9 +523,9 @@ impl HeMiPixApp {
         // the links side by side in one card (they wrap when the window is narrow)
         let mut links: Vec<(&str, &str, Action)> = vec![
             (tr("Project on GitHub", "Projekt na GitHubu"), PROJECT, Action::Open(format!("https://{PROJECT}"))),
-            (tr("What's new", "Co je nového"), RELEASES, Action::Open(format!("https://{RELEASES}"))),
+            (tr("What’s new", "Co je nového"), RELEASES, Action::Open(format!("https://{RELEASES}"))),
             (tr("Report a problem", "Nahlásit problém"), CONTACT, Action::Open(format!("https://{CONTACT}"))),
-            (tr("Licences", "Licence"), "", Action::OpenLicences),
+            (tr("Licenses", "Licence"), "", Action::OpenLicences),
         ];
         // HeMi Launcher on this PC: the updates are its job
         if crate::launcher::exe().is_some() {
@@ -620,7 +622,7 @@ impl HeMiPixApp {
                     }
                 }
                 if let State::Done(d) = &item.state
-                    && Btn::new("").icon(glyph::OPEN_FOLDER).subtle().tip(tr("Show in File Explorer", "Ukázat v Průzkumníkovi")).show(ui, &p).clicked()
+                    && Btn::new("").icon(glyph::OPEN_FOLDER).subtle().tip(tr("Show in File Explorer", "Zobrazit v Průzkumníkovi souborů")).show(ui, &p).clicked()
                 {
                     acts.push(Action::ShowFile(d.out.clone()));
                 }
@@ -629,7 +631,7 @@ impl HeMiPixApp {
                 match &item.state {
                     State::Done(d) => {
                         let less = 100.0 - d.out_size as f64 * 100.0 / d.in_size.max(1) as f64;
-                        let pct = if less >= 0.5 { format!("−{less:.0} %") } else { format!("+{:.0} %", -less) };
+                        let pct = if less >= 0.5 { format!("−{}", percent(&format!("{less:.0}"))) } else { format!("+{}", percent(&format!("{:.0}", -less))) };
                         ui.label(RichText::new(pct).font(theme::semibold(13.0)).color(if less >= 0.5 { p.success } else { p.text2 }));
                         ui.label(RichText::new(format!("{} → {}", size_text(d.in_size), size_text(d.out_size))).size(13.0).color(p.text2));
                     }
@@ -683,7 +685,7 @@ impl HeMiPixApp {
         painter.text(c + vec2(0.0, 34.0), Align2::CENTER_CENTER, hint, theme::body(13.0), p.text2);
     }
 
-    /// The settings on the right: quality, where to save, what to do with an existing JPG, metadata.
+    /// The settings on the right: quality, where to save, what to do with an existing file, metadata.
     fn settings(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let before = self.s.clone();
@@ -700,7 +702,7 @@ impl HeMiPixApp {
             ui.add_space(4.0);
             card(ui, &p, |ui| {
                 row_layout(ui, 36.0, |ui| {
-                    two_lines(ui, &p, tr("Format", "Formát"), tr("What the photos become", "Na co se fotky převedou"));
+                    two_lines(ui, &p, tr("Format", "Formát"), tr("What the photos are converted to", "Na co se fotky převedou"));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let items: Vec<&str> = Format::ALL.iter().map(|f| f.label()).collect();
                         let cur = Format::ALL.iter().position(|&f| f == self.s.format).unwrap_or(0);
@@ -742,11 +744,11 @@ impl HeMiPixApp {
             section(ui, &p, tr("Saving", "Ukládání"));
             card(ui, &p, |ui| {
                 row_layout(ui, 36.0, |ui| {
-                    ui.label(RichText::new(tr("Save to", "Uložit do")).size(14.0).color(p.text));
+                    ui.label(RichText::new(tr("Save to", "Uložit")).size(14.0).color(p.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let folder = self.s.format.label().to_uppercase();
-                        let beside = if i18n::cz() { format!("Složky „{folder}“") } else { format!("Folder “{folder}”") };
-                        let items = [tr("Next to the photos", "Vedle fotek"), beside.as_str(), tr("A chosen folder", "Vybrané složky")];
+                        let beside = if i18n::cz() { format!("Do složky „{folder}“") } else { format!("Folder “{folder}”") };
+                        let items = [tr("Next to the photos", "Vedle fotek"), beside.as_str(), tr("A chosen folder", "Do vybrané složky")];
                         let cur = match self.s.output {
                             Output::Same => 0,
                             Output::Subfolder => 1,
@@ -774,7 +776,7 @@ impl HeMiPixApp {
             });
             card(ui, &p, |ui| {
                 row_layout(ui, 36.0, |ui| {
-                    ui.label(RichText::new(tr("If the file exists", "Pokud soubor již existuje")).size(14.0).color(p.text));
+                    ui.label(RichText::new(tr("If the file exists", "Když soubor už existuje")).size(14.0).color(p.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let items = [tr("Add a number", "Přidat číslo"), tr("Replace it", "Nahradit"), tr("Skip the photo", "Fotku přeskočit")];
                         let cur = match self.s.existing {
@@ -794,7 +796,7 @@ impl HeMiPixApp {
                     let detail = if self.s.format.has_exif() {
                         tr("Date, camera, location", "Datum, fotoaparát, poloha")
                     } else {
-                        tr("Not carried into TIFF", "Do TIFF se nepřenášejí")
+                        tr("Not carried into TIFF", "Do TIFFu se nepřenášejí")
                     };
                     two_lines(ui, &p, tr("Metadata", "Metadata"), detail);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -861,13 +863,15 @@ impl HeMiPixApp {
                 let (a, b) = (done.iter().map(|d| d.in_size).sum::<u64>(), done.iter().map(|d| d.out_size).sum::<u64>());
                 let less = 100.0 - b as f64 * 100.0 / a.max(1) as f64;
                 ui.horizontal(|ui| {
-                    let t = tr("{n} converted · {a} → {b}", "Převedeno {n} · {a} → {b}")
+                    // Czech: the verb agrees with the count ("Převedena 1 fotka", "Převedeny 3 fotky", "Převedeno 5 fotek")
+                    let t = tr("{n} converted · {a} → {b}", "{verb} {n} · {a} → {b}")
+                        .replace("{verb}", i18n::plural(done.len(), "Převedena", "Převedeny", "Převedeno"))
                         .replace("{n}", &count(done.len()))
                         .replace("{a}", &size_text(a))
                         .replace("{b}", &size_text(b));
                     ui.label(RichText::new(t).size(13.0).color(p.text));
                     if less >= 0.5 {
-                        ui.label(RichText::new(format!("(−{less:.0} %)")).font(theme::semibold(13.0)).color(p.success));
+                        ui.label(RichText::new(format!("(−{})", percent(&format!("{less:.0}")))).font(theme::semibold(13.0)).color(p.success));
                     }
                 });
                 ui.add_space(6.0);
@@ -883,7 +887,7 @@ impl HeMiPixApp {
                     return;
                 }
                 let pending = self.pending();
-                let label = if pending > 0 { tr("Convert {n}", "Převést {n}").replace("{n}", &count(pending)) } else { tr("Convert", "Převést").to_string() };
+                let label = if pending > 0 { tr("Convert {n}", "Převést {n}").replace("{n}", &count_object(pending)) } else { tr("Convert", "Převést").to_string() };
                 if Btn::new(&label).icon(glyph::CHECK).accent().enabled(pending > 0).show(ui, &p).clicked() {
                     acts.push(Action::Convert);
                 }
@@ -949,8 +953,8 @@ impl HeMiPixApp {
                 ui.label(RichText::new(tr("Photo extensions from Microsoft", "Rozšíření fotek od Microsoftu")).font(theme::semibold(20.0)).color(p.text));
                 ui.add_space(10.0);
                 let text = tr(
-                    "HEIC photos are read by Windows itself, with two free extensions that are missing on this PC. Without them HeMiPix converts everything but HEIC.",
-                    "Fotky HEIC čte samotný Windows pomocí dvou bezplatných rozšíření, která v tomto počítači chybí. Bez nich HeMiPix převede vše kromě HEIC.",
+                    "HEIC photos are read by Windows itself, with two free extensions. Without them HeMiPix converts everything but HEIC. Missing on this PC:",
+                    "Fotky HEIC čte samotný Windows pomocí dvou bezplatných rozšíření. Bez nich HeMiPix převede vše kromě HEIC. V tomto počítači chybí:",
                 );
                 ui.add(egui::Label::new(RichText::new(text).size(14.0).color(p.text)).wrap());
                 ui.add_space(12.0);
@@ -972,7 +976,7 @@ impl HeMiPixApp {
                     ui.horizontal(|ui| {
                         ui.add(egui::Spinner::new().size(16.0).color(p.accent_text));
                         ui.add_space(8.0);
-                        let wait = tr("Installing – finish the window of the Microsoft Store if it opened…", "Instaluji – pokud se otevřelo okno Microsoft Storu, dokonči v něm instalaci…");
+                        let wait = tr("Installing – if the Microsoft Store window opened, finish the installation there…", "Instaluji – pokud se otevřelo okno Microsoft Storu, dokonči v něm instalaci…");
                         ui.add(egui::Label::new(RichText::new(wait).size(13.0).color(p.text2)).wrap());
                     });
                 } else if checkbox(ui, &p, self.deps_accept, tr("I accept the license terms and want them installed", "Souhlasím s licenčními podmínkami a chci je nainstalovat")).clicked() {
@@ -1114,7 +1118,7 @@ impl HeMiPixApp {
                         let crop = ed.result();
                         if item.crop != crop {
                             item.crop = crop;
-                            // a converted photo cropped anew waits to be converted again (into the same JPG)
+                            // a converted photo cropped anew waits to be converted again (into the same file)
                             if matches!(item.state, State::Done(_) | State::Skipped) {
                                 item.state = State::Waiting;
                             }
@@ -1248,16 +1252,19 @@ fn walk(dir: &Path, depth: u32, format: Format, out: &mut Vec<PathBuf>) {
 }
 /// "1 photo" / "5 photos", "1 fotka" / "3 fotky" / "5 fotek".
 fn count(n: usize) -> String {
-    if i18n::cz() {
-        let word = match n {
-            1 => "fotka",
-            2..=4 => "fotky",
-            _ => "fotek",
-        };
-        format!("{n} {word}")
-    } else {
-        format!("{n} {}", if n == 1 { "photo" } else { "photos" })
-    }
+    let word = if i18n::cz() { i18n::plural(n, "fotka", "fotky", "fotek") } else { i18n::plural(n, "photo", "photos", "photos") };
+    format!("{n} {word}")
+}
+
+/// The same as the object of a verb ("Převést 1 fotku"); English does not change.
+fn count_object(n: usize) -> String {
+    let word = if i18n::cz() { i18n::plural(n, "fotku", "fotky", "fotek") } else { i18n::plural(n, "photo", "photos", "photos") };
+    format!("{n} {word}")
+}
+
+/// A percentage: "42%" in English, "42 %" in Czech.
+fn percent(v: &str) -> String {
+    if i18n::cz() { format!("{v} %") } else { format!("{v}%") }
 }
 
 /// A file size as people read it: "820 kB", "3.4 MB" (Czech: "3,4 MB").
@@ -1284,7 +1291,7 @@ fn shell_open(target: &str) {
 
 /// File Explorer with the file selected.
 fn show_in_explorer(file: &Path) {
-    let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn();
+    let _ = std::process::Command::new(crate::deps::program("explorer.exe")).arg(format!("/select,{}", file.display())).spawn();
 }
 
 /// The window as the owner of the file dialogs.

@@ -4,7 +4,8 @@
 
 Photos from an iPhone are HEIC – and many programs and websites still want **JPG**. HeMiPix converts photos between
 **HEIC, JPG, PNG, WebP and TIFF** – **whole folders at once** –, can make them **smaller** and lets you **crop** each
-photo with a frame you drag. In the look of Windows 11, and it never goes online.
+photo with a frame you drag. In the look of Windows 11, and it never goes online by itself (only the optional install of
+the HEIC extensions, after you agree, uses winget and the Microsoft Store).
 
 **[Download](https://github.com/Hemal1k/HeMiPix/releases/latest)** · [Project page](https://hemal1k.github.io/hemipix.html) · [Report a problem](https://github.com/Hemal1k/HeMiPix/issues)
 
@@ -34,12 +35,12 @@ Extensions** from the Microsoft Store (most PCs have them; the installer – and
   fixed shape (1:1, 4:3, 3:2, 16:9 – turned for upright photos), the size in pixels shown; ‹ › go through the photos.
 - **Upright**: photos come out turned the right way, also JPGs with an Exif orientation.
 - **Metadata** (Exif: date taken, camera, location) is kept in JPG, PNG and WebP – or kept **without the location**, or removed (one choice);
-  the colour profile (Display P3 of iPhones) stays too; the file date of the original stays, so the photos sort as
+  the color profile (Display P3 of iPhones) stays too; the file date of the original stays, so the photos sort as
   before.
 - **Where to**: next to the photos, into a folder named by the format (“JPG”, “PNG” …) beside them, or into one chosen
   folder; an existing file gets a number, is replaced or the photo is skipped. From a folder, the files that already
   are of the chosen format are left out.
-- **Mica** of Windows 11 behind the window, light and dark as Windows (or HeMiDock).
+- **Mica** of Windows 11 behind the window, light and dark as Windows (or as chosen in Settings).
 - **File Explorer item** “Convert with HeMiPix” for HEIC photos and folders – a switch in Settings (the gear), off by default,
   written only for the current user.
 
@@ -58,7 +59,7 @@ so it runs without the Visual C++ Redistributable). `cargo test` runs the unit t
 `HEMIPIX_SAMPLES=<folder with .heic photos> cargo test -- --include-ignored` also real conversions.
 
 `release.ps1` builds the downloads into `build\dist` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)): the
-installer (`installer\HeMiPix.iss`) and the portable zip. A release published on GitHub runs the same script in
+installer (`installer\HeMiPix.iss`) and the portable exe files (x64 and ARM64). A release published on GitHub runs the same script in
 `.github\workflows\release.yml` and gets the files attached.
 
 ## Project
@@ -69,8 +70,11 @@ installer (`installer\HeMiPix.iss`) and the portable zip. A release published on
 | `src\app.rs` | The window: the list of photos, the settings, the progress and the Convert button. |
 | `src\convert.rs` | One photo through the Windows Imaging Component: decode, turn upright, crop, write JPG / PNG / TIFF (WebP through libwebp); many photos on several threads; the preview for cropping. |
 | `src\crop.rs` | The crop editor: the preview with the frame, the shapes. |
-| `src\container.rs` | The metadata and the colour profile put into PNG and WebP files. |
-| `src\info.rs` | The metadata (Exif): read from the original, orientation set to upright, location removed if wanted, written into a JPG. |
+| `src\container.rs` | The metadata and the color profile put into PNG and WebP files. |
+| `src\info.rs` | The metadata (Exif): read from the original, orientation set to upright, location removed if wanted, written into a JPG (PNG and WebP: `src\container.rs`). |
+| `src\deps.rs` | The HEIF / HEVC extensions: checked at the start, installed after the user agrees (winget, Microsoft Store). |
+| `src\launcher.rs` | HeMi Launcher on this PC: the button for updates. |
+| `src\look.rs` | Theme and language (`appearance.ini`). |
 | `src\inbox.rs` | Photos from other starts of HeMiPix (File Explorer starts it once per selected photo). |
 | `src\settings.rs` | What HeMiPix remembers between runs. |
 | `src\shell_menu.rs` | The optional File Explorer item (`HKCU\Software\Classes`). |

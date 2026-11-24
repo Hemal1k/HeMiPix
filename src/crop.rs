@@ -216,11 +216,13 @@ impl Editor {
                 }
                 Drag::Handle { hx, hy } => {
                     let mut r = frame;
+                    // min never above max (f32::clamp would panic): a frame narrower than MIN – a very narrow
+                    // picture, or a window made smaller – just stays inside the picture
                     match (hx, hy) {
-                        (-1, _) => r.min.x = pos.x.clamp(img.left(), r.max.x - MIN),
-                        (1, _) => r.max.x = pos.x.clamp(r.min.x + MIN, img.right()),
-                        (_, -1) => r.min.y = pos.y.clamp(img.top(), r.max.y - MIN),
-                        _ => r.max.y = pos.y.clamp(r.min.y + MIN, img.bottom()),
+                        (-1, _) => r.min.x = pos.x.clamp(img.left(), (r.max.x - MIN).max(img.left())),
+                        (1, _) => r.max.x = pos.x.clamp((r.min.x + MIN).min(img.right()), img.right()),
+                        (_, -1) => r.min.y = pos.y.clamp(img.top(), (r.max.y - MIN).max(img.top())),
+                        _ => r.max.y = pos.y.clamp((r.min.y + MIN).min(img.bottom()), img.bottom()),
                     }
                     r
                 }
