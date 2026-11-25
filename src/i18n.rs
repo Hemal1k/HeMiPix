@@ -27,6 +27,7 @@ pub fn cz() -> bool {
                 _ => {}
             }
         }
+        // SAFETY: no arguments, no pointers; it only returns the language ID.
         (unsafe { GetUserDefaultUILanguage() } & 0x3FF) == 0x05
     })
 }

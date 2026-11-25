@@ -29,12 +29,10 @@ impl Look {
         l
     }
 
-    pub fn save(&self) {
-        if let Some(f) = file() {
-            if let Some(dir) = f.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(f, format!("Theme={}\nLanguage={}\n", self.theme, self.language));
+    pub fn save(&self) -> std::io::Result<()> {
+        match file() {
+            Some(f) => crate::settings::write_atomic(&f, &format!("Theme={}\nLanguage={}\n", self.theme, self.language)),
+            None => Ok(()),
         }
     }
 }

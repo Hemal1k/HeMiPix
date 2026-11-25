@@ -41,11 +41,11 @@ pub fn check() -> Missing {
     Missing { heif: !heif, hevc: !hevc }
 }
 
-/// Installs what is missing; true when winget took the HEIF extension (or it was not needed).
-pub fn install(m: Missing) -> bool {
-    let mut ok = true;
+/// Installs what is missing. When winget fails, the install window of the Microsoft Store opens instead, so the user
+/// always sees a way on (the dialog then waits for the extensions to appear).
+pub fn install(m: Missing) {
     if m.heif {
-        ok = Command::new(program("winget.exe"))
+        let ok = Command::new(program("winget.exe"))
             .args(["install", "--id", "9PMMSR1CGPWG", "--source", "msstore", "--silent", "--accept-package-agreements", "--accept-source-agreements"])
             .creation_flags(CREATE_NO_WINDOW)
             .status()
@@ -58,7 +58,6 @@ pub fn install(m: Missing) -> bool {
     if m.hevc {
         open("ms-windows-store://pdp/?ProductId=9N4WGH0Z6VHQ&mode=mini");
     }
-    ok
 }
 
 /// The full path of a program of Windows given by its name: from System32, PowerShell from its own folder there,
@@ -83,10 +82,7 @@ pub fn program(exe: &str) -> std::path::PathBuf {
     }
 }
 
-pub fn open(target: &str) {
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let w = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let (verb, t) = (w("open"), w(target));
-    unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), t.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+fn open(target: &str) {
+    // nothing more to do when it fails: the dialog keeps waiting and can be closed
+    let _ = crate::sys::open(target);
 }

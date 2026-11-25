@@ -13,6 +13,7 @@ mod inbox;
 mod info;
 mod settings;
 mod shell_menu;
+mod sys;
 mod theme;
 mod widgets;
 
@@ -40,7 +41,7 @@ fn main() -> eframe::Result {
     }
     // what the first window left unread last time is old
     let _ = inbox::take();
-    shell_menu::repair();
+    shell_menu::repair_if_broken();
 
     let icon = egui::IconData { rgba: include_bytes!("../assets/HeMiPix-64.rgba").to_vec(), width: 64, height: 64 };
     let options = eframe::NativeOptions {

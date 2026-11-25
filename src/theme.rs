@@ -4,6 +4,7 @@
 //! Light / dark and the accent: the own setting of the app, else Windows (no longer the settings of HeMiDock – they
 //! changed every HeMi app at once).
 
+use crate::sys::wide;
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle};
 use eframe::epaint::text::VariationCoords;
 use std::ptr::null_mut;
@@ -187,6 +188,7 @@ fn reg_dword(key: &str, value: &str) -> Option<u32> {
     let (k, v) = (wide(key), wide(value));
     let mut data = 0u32;
     let mut size = 4u32;
+    // SAFETY: `k` and `v` are NUL-terminated UTF-16 and live for the call; `data` is a u32 and `size` says 4 bytes.
     let r = unsafe {
         RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_DWORD, null_mut(), &mut data as *mut u32 as _, &mut size)
     };
@@ -197,6 +199,7 @@ fn reg_binary(key: &str, value: &str) -> Option<Vec<u8>> {
     let (k, v) = (wide(key), wide(value));
     let mut data = vec![0u8; 64];
     let mut size = data.len() as u32;
+    // SAFETY: `k` and `v` are NUL-terminated UTF-16; `size` is the real length of `data`, which RegGetValueW respects.
     let r = unsafe {
         RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_BINARY, null_mut(), data.as_mut_ptr() as _, &mut size)
     };
@@ -204,15 +207,6 @@ fn reg_binary(key: &str, value: &str) -> Option<Vec<u8>> {
         data.truncate(size as usize);
         data
     })
-}
-
-/// A value from HeMiDock's settings.json (a flat object; no JSON library needed).
-fn setting<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let k = format!("\"{key}\"");
-    let rest = &json[json.find(&k)? + k.len()..];
-    let rest = rest.trim_start().strip_prefix(':')?.trim_start();
-    let end = rest.find([',', '\n', '}'])?;
-    Some(rest[..end].trim().trim_matches('"'))
 }
 
 fn shades(base: Color32) -> [Color32; 7] {
@@ -224,11 +218,9 @@ fn shades(base: Color32) -> [Color32; 7] {
 pub fn read_source(mode: u8) -> Source {
     // each app has its own look (the user, 2026-11-19: the theme of HeMiDock changed HeMi Launcher too): the settings of
     // HeMiDock are not read any more – "as Windows" is the light / dark mode and the accent colour of Windows
-    let hemidock = String::new();
-    let theme_mode = setting(&hemidock, "ThemeMode").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
     let theme_mode = match mode {
-        1 | 2 => mode as i32,
-        _ => theme_mode,
+        1 | 2 => i32::from(mode),
+        _ => 0,
     };
     // Debug builds only: HEMI_THEME=light / dark for screenshots, without changing Windows
     let theme_mode = match std::env::var("HEMI_THEME").ok().filter(|_| cfg!(debug_assertions)).as_deref() {
@@ -242,18 +234,9 @@ pub fn read_source(mode: u8) -> Source {
         _ => reg_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme").unwrap_or(1) != 0,
     };
 
-    let own = (setting(&hemidock, "AccentMode") == Some("1"))
-        .then(|| setting(&hemidock, "AccentColor"))
-        .flatten()
-        .and_then(|c| u32::from_str_radix(c.trim_start_matches('#'), 16).ok())
-        .map(|c| rgb((c >> 16) as u8, (c >> 8) as u8, c as u8));
-
-    let accent = match own {
-        Some(c) => shades(c),
-        None => match reg_binary(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent", "AccentPalette") {
-            Some(p) if p.len() >= 28 => std::array::from_fn(|i| rgb(p[i * 4], p[i * 4 + 1], p[i * 4 + 2])),
-            _ => shades(rgb(0x00, 0x78, 0xD4)),
-        },
+    let accent = match reg_binary(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent", "AccentPalette") {
+        Some(p) if p.len() >= 28 => std::array::from_fn(|i| rgb(p[i * 4], p[i * 4 + 1], p[i * 4 + 2])),
+        _ => shades(rgb(0x00, 0x78, 0xD4)),
     };
     Source { light, accent }
 }
@@ -374,6 +357,8 @@ pub fn style_window(hwnd: isize, p: &Palette, mica: bool) -> bool {
     }
     let hwnd = hwnd as HWND;
     let dark: i32 = (!p.light) as i32;
+    // SAFETY: `hwnd` is the live window of this app; every attribute gets a pointer to a local of the stated size (4 bytes)
+    // and `m` lives for the DwmExtendFrameIntoClientArea call.
     unsafe {
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE as _, &dark as *const i32 as _, 4);
         let backdrop: i32 = if mica { DWMSBT_MAINWINDOW } else { DWMSBT_AUTO };
@@ -390,7 +375,4 @@ pub fn style_window(hwnd: isize, p: &Palette, mica: bool) -> bool {
         DwmExtendFrameIntoClientArea(hwnd, &m);
         mica_on
     }
-}
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
 }

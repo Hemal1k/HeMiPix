@@ -54,12 +54,9 @@ impl Format {
         }
     }
 
-    pub fn key(self) -> &'static str {
-        self.ext()
-    }
-
+    /// The format saved in the settings by its extension (`ext`).
     pub fn from_key(k: &str) -> Format {
-        Format::ALL.into_iter().find(|f| f.key() == k).unwrap_or(Format::Jpg)
+        Format::ALL.into_iter().find(|f| f.ext() == k).unwrap_or(Format::Jpg)
     }
 
     /// A file already of this format (by its extension).
@@ -129,10 +126,29 @@ pub struct Done {
     pub out_size: u64,
     pub width: u32,
     pub height: u32,
+    /// What could not be carried over although it was wanted ("without metadata" …), shown in the row.
+    pub note: Option<&'static str>,
+}
+
+/// The size of the new picture and what could not be carried over.
+struct Encoded {
+    width: u32,
+    height: u32,
+    note: Option<&'static str>,
+}
+
+fn without_metadata() -> &'static str {
+    crate::i18n::tr("without metadata (too big)", "bez metadat (příliš velká)")
+}
+
+fn without_profile() -> &'static str {
+    crate::i18n::tr("without color profile", "bez barevného profilu")
 }
 
 /// The imaging factory of this thread (COM is started for the thread first).
 pub fn factory() -> Result<IWICImagingFactory, Fail> {
+    // SAFETY: COM is started for this thread (a second start returns S_FALSE, a different apartment an error that
+    // CoCreateInstance then reports); the factory is used only on this thread.
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         Ok(CoCreateInstance(&CLSID_WICImagingFactory2, None, CLSCTX_INPROC_SERVER)?)
@@ -155,6 +171,7 @@ fn transform_of(orientation: u16) -> WICBitmapTransformOptions {
 
 /// The orientation the decoder reports for the frame (System.Photo.Orientation), 1 when there is none.
 fn orientation(frame: &IWICBitmapFrameDecode) -> u16 {
+    // SAFETY: `frame` is a live decoder frame; the PROPVARIANT union is read as `uiVal` only when `vt` says VT_UI2.
     unsafe {
         let Ok(reader) = frame.GetMetadataQueryReader() else { return 1 };
         let mut v = PROPVARIANT::default();
@@ -168,6 +185,7 @@ fn orientation(frame: &IWICBitmapFrameDecode) -> u16 {
 
 /// The colour profile (ICC) of the original, to be written into the new file unchanged.
 fn color_profile(factory: &IWICImagingFactory, frame: &IWICBitmapFrameDecode) -> Option<IWICColorContext> {
+    // SAFETY: the first call only asks for the count; the second gets a list of exactly `count` created contexts.
     unsafe {
         let mut count = 0u32;
         if frame.GetColorContexts(&mut [], &mut count).is_err() || count == 0 {
@@ -183,6 +201,7 @@ fn color_profile(factory: &IWICImagingFactory, frame: &IWICBitmapFrameDecode) ->
 
 /// The bytes of a colour profile (for WebP, which gets it by hand).
 fn profile_bytes(c: &IWICColorContext) -> Option<Vec<u8>> {
+    // SAFETY: the first call asks for the size, the second writes into a buffer of that size (a slice: WIC gets its length).
     unsafe {
         let mut size = 0u32;
         c.GetProfileBytes(&mut [], &mut size).ok()?;
@@ -194,6 +213,7 @@ fn profile_bytes(c: &IWICColorContext) -> Option<Vec<u8>> {
 
 /// The picture has transparent parts (its pixel format has alpha).
 fn has_alpha(factory: &IWICImagingFactory, source: &IWICBitmapSource) -> bool {
+    // SAFETY: calls on live COM objects of this thread, without raw buffers.
     unsafe {
         let Ok(format) = source.GetPixelFormat() else { return false };
         factory
@@ -242,6 +262,7 @@ fn pixels(factory: &IWICImagingFactory, source: &IWICBitmapSource, format: &GUID
     buf.try_reserve_exact(len)
         .map_err(|_| Fail::Msg(crate::i18n::tr("Not enough memory for this picture.", "Na tento obrázek nestačí paměť.").into()))?;
     buf.resize(len, 0);
+    // SAFETY: `buf` holds `stride` × `h` bytes, exactly what CopyPixels writes for the whole w × h picture.
     unsafe {
         let converter = factory.CreateFormatConverter()?;
         converter.Initialize(source, format, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
@@ -266,8 +287,8 @@ pub fn convert(factory: &IWICImagingFactory, src: &Path, dst: &Path, o: &Options
     // the metadata of the original, upright and without the location if wanted
     let exif = if o.keep_exif && o.format.has_exif() { info::read(src, o.remove_gps) } else { None };
     let r = encode(factory, src, &tmp, o, crop, exif.as_deref());
-    let (width, height) = match r {
-        Ok(size) => size,
+    let Encoded { width, height, note } = match r {
+        Ok(e) => e,
         Err(e) => {
             let _ = std::fs::remove_file(&tmp);
             return Err(e);
@@ -275,24 +296,32 @@ pub fn convert(factory: &IWICImagingFactory, src: &Path, dst: &Path, o: &Options
     };
     // the date of the original stays, so the photos sort as before
     if let Ok(modified) = std::fs::metadata(src).and_then(|m| m.modified()) {
+        // best effort: the new file is fine without it (it then has the time of now)
         let _ = std::fs::File::options().write(true).open(&tmp).and_then(|f| f.set_modified(modified));
     }
     std::fs::rename(&tmp, dst).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })?;
     let out_size = std::fs::metadata(dst)?.len();
-    Ok(Done { out: dst.to_path_buf(), in_size, out_size, width, height })
+    Ok(Done { out: dst.to_path_buf(), in_size, out_size, width, height, note })
 }
 
 /// A property of an encoder: a float (quality) or a byte (TIFF compression).
+///
+/// # Safety
+/// `value` must be filled as its `vt` says.
 unsafe fn set_option(props: &windows::Win32::System::Com::StructuredStorage::IPropertyBag2, name: &str, value: VARIANT) -> Result<(), Fail> {
-    let mut name: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    let mut name = crate::sys::wide(name);
     let bag = PROPBAG2 { pstrName: PWSTR(name.as_mut_ptr()), ..Default::default() };
+    // SAFETY: one property; `pstrName` points to `name`, which lives (NUL-terminated) until after the call, and the
+    // caller filled `value` as its `vt` says.
     unsafe { props.Write(1, &bag, &value)? };
     Ok(())
 }
 
-fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, crop: Option<CropRect>, exif: Option<&[u8]>) -> Result<(u32, u32), Fail> {
+fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, crop: Option<CropRect>, exif: Option<&[u8]>) -> Result<Encoded, Fail> {
+    // SAFETY: the calls of WIC get live COM objects of this thread and buffers of the size they are told; the VARIANTs
+    // are filled field by field as their `vt` says.
     unsafe {
         let decoder = factory.CreateDecoderFromFilename(&HSTRING::from(src.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
         let frame = decoder.GetFrame(0)?;
@@ -315,7 +344,9 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
             let (x, y, cw, ch) = crop_pixels(w, h, c);
             if (cw, ch) != (w, h) {
                 let clipper = factory.CreateBitmapClipper()?;
-                let rect = WICRect { X: x as i32, Y: y as i32, Width: cw as i32, Height: ch as i32 };
+                // the sizes are at most 200 MP (check_size), so they always fit into i32
+                let int = |v: u32| i32::try_from(v).map_err(|_| too_big());
+                let rect = WICRect { X: int(x)?, Y: int(y)?, Width: int(cw)?, Height: int(ch)? };
                 clipper.Initialize(&source, &rect)?;
                 source = clipper.into();
                 (w, h) = (cw, ch);
@@ -344,15 +375,16 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
             };
             let data = encoded.map_err(|e| Fail::Msg(format!("WebP: {e:?}")))?;
             let icc = profile.as_ref().and_then(profile_bytes);
+            let note = (profile.is_some() && icc.is_none()).then(without_profile);
             std::fs::write(tmp, container::webp_with(&data, w, h, icc.as_deref(), exif))?;
-            return Ok((w, h));
+            return Ok(Encoded { width: w, height: h, note });
         }
 
         // JPG has no transparency: transparent parts are put on white (not black)
         if o.format == Format::Jpg && alpha {
             let bgra = pixels(factory, &source, &GUID_WICPixelFormat32bppBGRA, 4, w, h)?;
             let mut bgr = Vec::with_capacity(bgra.len() / 4 * 3);
-            for p in bgra.chunks_exact(4) {
+            for p in bgra.as_chunks::<4>().0 {
                 let a = p[3] as u32;
                 for c in &p[..3] {
                     bgr.push(((*c as u32 * a + 255 * (255 - a)) / 255) as u8);
@@ -388,6 +420,7 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
                     // lossless and read everywhere
                     (*value.Anonymous.Anonymous).vt = VT_UI1;
                     (*value.Anonymous.Anonymous).Anonymous.bVal = WICTiffCompressionLZW.0 as u8;
+                    // optional: when the encoder does not take it, TIFF is written with its own (lossless) default
                     let _ = set_option(props, "TiffCompressionMethod", value);
                 }
                 _ => {}
@@ -396,8 +429,12 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
         out.Initialize(props.as_ref())?;
         out.SetSize(w, h)?;
         out.SetPixelFormat(&mut pixel_format)?;
-        if let Some(p) = profile {
-            let _ = out.SetColorContexts(&[Some(p)]);
+        // the colour profile: when the encoder refuses it, the file is still written, and the row says so
+        let mut note = None;
+        if let Some(p) = profile
+            && out.SetColorContexts(&[Some(p)]).is_err()
+        {
+            note = Some(without_profile());
         }
         out.WriteSource(&converter, std::ptr::null())?;
         out.Commit()?;
@@ -408,13 +445,20 @@ fn encode(factory: &IWICImagingFactory, src: &Path, tmp: &Path, o: &Options, cro
         if let Some(tiff) = exif {
             let data = std::fs::read(tmp)?;
             let with = match o.format {
-                Format::Jpg => info::insert(&data, tiff),
+                Format::Jpg => match info::insert(&data, tiff) {
+                    Some(with) => with,
+                    None => {
+                        // more than one APP1 segment holds (a big MakerNote): the photo without its metadata
+                        note = Some(without_metadata());
+                        data
+                    }
+                },
                 Format::Png => container::png_with_exif(&data, tiff),
                 _ => data,
             };
             std::fs::write(tmp, with)?;
         }
-        Ok((w, h))
+        Ok(Encoded { width: w, height: h, note })
     }
 }
 /// A small upright picture of the photo for the crop editor.
@@ -428,6 +472,7 @@ pub struct Preview {
 
 pub fn preview(src: &Path, max: u32) -> Result<Preview, Fail> {
     let factory = factory()?;
+    // SAFETY: calls of WIC on live COM objects of this thread; `rgba` holds w × h × 4 bytes for CopyPixels.
     unsafe {
         let decoder = factory.CreateDecoderFromFilename(&HSTRING::from(src.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
         let frame = decoder.GetFrame(0)?;
@@ -645,7 +690,7 @@ mod tests {
             tiff.extend_from_slice(&v.to_be_bytes());
         }
         let src = tmp.join("rotated.jpg");
-        std::fs::write(&src, crate::info::insert(&std::fs::read(&plain).unwrap(), &tiff)).unwrap();
+        std::fs::write(&src, crate::info::insert(&std::fs::read(&plain).unwrap(), &tiff).unwrap()).unwrap();
         let (w, h) = size_of(&f, &src);
         for remove_gps in [false, true] {
             let dst = tmp.join(format!("upright-{remove_gps}.jpg"));
@@ -676,7 +721,7 @@ mod tests {
         tiff.extend_from_slice(&[0x01, 0x10, 0, 2, 0, 0, 0, 4, b'P', b'i', b'x', 0]);
         tiff.extend_from_slice(&0u32.to_be_bytes());
         let src = tmp.join("with-exif.jpg");
-        std::fs::write(&src, crate::info::insert(&std::fs::read(&plain).unwrap(), &tiff)).unwrap();
+        std::fs::write(&src, crate::info::insert(&std::fs::read(&plain).unwrap(), &tiff).unwrap()).unwrap();
         let (w, h) = size_of(&f, &src);
         for format in [Format::Png, Format::Webp, Format::Tiff] {
             let dst = tmp.join(format!("out.{}", format.ext()));

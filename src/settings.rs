@@ -55,6 +55,7 @@ fn file() -> Option<PathBuf> {
     let dir = roaming.join("HeMi").join("HeMiPix");
     let old = roaming.join("HeMiPix");
     if !dir.exists() && old.is_dir() {
+        // best effort: when the move fails, the old settings are simply not taken (the defaults, saved anew)
         let _ = std::fs::create_dir_all(roaming.join("HeMi"));
         let _ = std::fs::rename(&old, &dir);
     }
@@ -74,7 +75,7 @@ impl Settings {
             let b = v == "1" || v.eq_ignore_ascii_case("true");
             match k {
                 "Format" => s.format = Format::from_key(v),
-                "Quality" => s.quality = v.parse::<u8>().unwrap_or(85).clamp(10, 100),
+                "Quality" => s.quality = v.parse::<u8>().unwrap_or(85).clamp(30, 100),
                 "Output" => {
                     s.output = match v {
                         "subfolder" => Output::Subfolder,
@@ -102,8 +103,8 @@ impl Settings {
         s
     }
 
-    pub fn save(&self) {
-        let Some(f) = file() else { return };
+    pub fn save(&self) -> std::io::Result<()> {
+        let Some(f) = file() else { return Ok(()) };
         let b = |v: bool| if v { "1" } else { "0" };
         let output = match self.output {
             Output::Same => "same",
@@ -117,7 +118,7 @@ impl Settings {
         };
         let text = format!(
             "Format={}\nQuality={}\nOutput={}\nFolder={}\nExisting={}\nKeepExif={}\nRemoveGps={}\n",
-            self.format.key(),
+            self.format.ext(),
             self.quality,
             output,
             self.folder.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
@@ -125,9 +126,18 @@ impl Settings {
             b(self.keep_exif),
             b(self.remove_gps),
         );
-        if let Some(dir) = f.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(f, text);
+        write_atomic(&f, &text)
     }
+}
+
+/// Writes the file through a temporary one next to it and a rename, so a crash never leaves half a file.
+pub fn write_atomic(f: &std::path::Path, text: &str) -> std::io::Result<()> {
+    if let Some(dir) = f.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = f.with_extension("ini.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, f).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }

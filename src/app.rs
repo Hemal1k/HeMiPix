@@ -253,7 +253,7 @@ impl HeMiPixApp {
         if jobs.is_empty() {
             return self.toast(tr("Nothing to convert – the files exist already.", "Není co převádět – soubory už existují."), Tone::Caution);
         }
-        self.s.save();
+        self.save_settings();
         self.run_id += 1;
         let stop = Arc::new(AtomicBool::new(false));
         self.run = Some(Run { stop: stop.clone(), total: jobs.len(), finished: 0 });
@@ -356,6 +356,32 @@ impl HeMiPixApp {
 
     fn toast(&mut self, text: impl Into<String>, tone: Tone) {
         self.toast = Some(Toast { text: text.into(), tone, until: Instant::now() + Duration::from_secs(6) });
+    }
+
+    /// Saves the settings; when that fails, a note says so (the settings still apply until HeMiPix ends).
+    fn save_settings(&mut self) {
+        if let Err(e) = self.s.save() {
+            self.save_failed(&e);
+        }
+    }
+
+    /// A web page or a file by its default program; a note when Windows could not open it.
+    fn open_target(&mut self, target: &str) {
+        if !crate::sys::open(target) {
+            self.toast(tr("Windows could not open it.", "Windows to nedokázal otevřít."), Tone::Critical);
+        }
+    }
+
+    fn show_file(&mut self, file: &Path) {
+        if let Err(e) = show_in_explorer(file) {
+            let t = tr("File Explorer could not be opened: {e}", "Průzkumník souborů se nepodařilo otevřít: {e}");
+            self.toast(t.replace("{e}", &e.to_string()), Tone::Critical);
+        }
+    }
+
+    fn save_failed(&mut self, e: &std::io::Error) {
+        let t = tr("The settings could not be saved: {e}", "Nastavení se nepodařilo uložit: {e}");
+        self.toast(t.replace("{e}", &e.to_string()), Tone::Caution);
     }
 
     /// Asks on another thread what of the HEIC extensions is missing (the answer opens the dialog when something is).
@@ -650,10 +676,11 @@ impl HeMiPixApp {
                     let cropped = if item.crop.is_some() { tr("Cropped · ", "Oříznuto · ") } else { "" };
                     let detail = match &item.state {
                         State::Done(d) => format!(
-                            "→ {} · {} × {}",
+                            "→ {} · {} × {}{}",
                             d.out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                             d.width,
-                            d.height
+                            d.height,
+                            d.note.map(|n| format!(" · {n}")).unwrap_or_default()
                         ),
                         State::Failed(e) => e.clone(),
                         _ => format!("{cropped}{}", item.src.parent().map(|d| d.display().to_string()).unwrap_or_default()),
@@ -793,7 +820,10 @@ impl HeMiPixApp {
             card(ui, &p, |ui| {
                 row_layout(ui, 36.0, |ui| {
                     // one choice: everything, everything but the location, or nothing (TIFF gets none)
-                    let detail = if self.s.format.has_exif() {
+                    let detail = if self.s.format.has_exif() && self.s.keep_exif && self.s.remove_gps {
+                        // only the GPS block goes: the serial numbers, the owner's name and the MakerNote stay
+                        tr("Camera serial numbers stay", "Sériová čísla fotoaparátu zůstanou")
+                    } else if self.s.format.has_exif() {
                         tr("Date, camera, location", "Datum, fotoaparát, poloha")
                     } else {
                         tr("Not carried into TIFF", "Do TIFFu se nepřenášejí")
@@ -814,7 +844,7 @@ impl HeMiPixApp {
             });
         });
         if self.s != before {
-            self.s.save();
+            self.save_settings();
         }
     }
 
@@ -971,6 +1001,15 @@ impl HeMiPixApp {
                     });
                     ui.add_space(6.0);
                 }
+                if m.heif {
+                    // winget accepts the terms of its "msstore" source for the user, which send the region to Microsoft
+                    let note = tr(
+                        "HEIF is installed by winget from the Microsoft Store (which receives your region).",
+                        "HEIF nainstaluje winget z Microsoft Storu (ten dostane tvůj region).",
+                    );
+                    ui.add(egui::Label::new(RichText::new(note).size(13.0).color(p.text2)).wrap());
+                    ui.add_space(6.0);
+                }
                 ui.add_space(8.0);
                 if self.deps_installing {
                     ui.horizontal(|ui| {
@@ -1021,7 +1060,9 @@ impl HeMiPixApp {
         for a in acts {
             match a {
                 Action::SetLook(l) => {
-                    l.save();
+                    if let Err(e) = l.save() {
+                        self.save_failed(&e);
+                    }
                     crate::i18n::set(l.language);
                     self.look = l;
                     // the new colours at once, not after the next look at the theme
@@ -1056,26 +1097,31 @@ impl HeMiPixApp {
                     if let Some(d) = self.pick_folder(tr("Choose the folder for the new files", "Vyber složku pro nové soubory")) {
                         self.s.folder = Some(d);
                         self.s.output = Output::Folder;
-                        self.s.save();
+                        self.save_settings();
                     }
                 }
                 Action::OpenOutput => {
-                    if let Some(f) = &self.last_out {
-                        show_in_explorer(f);
+                    if let Some(f) = self.last_out.clone() {
+                        self.show_file(&f);
                     }
                 }
-                Action::ShowFile(f) => show_in_explorer(&f),
+                Action::ShowFile(f) => self.show_file(&f),
                 Action::ToggleMenu => match crate::shell_menu::set(!self.menu_on) {
                     Ok(()) => self.menu_on = crate::shell_menu::is_on(),
                     Err(e) => self.toast(e, Tone::Critical),
                 },
                 Action::About(on) => self.about = on,
-                Action::Open(t) => shell_open(&t),
-                Action::Launcher => crate::launcher::open(),
+                Action::Open(t) => self.open_target(&t),
+                Action::Launcher => {
+                    if let Err(e) = crate::launcher::open() {
+                        let t = tr("HeMi Launcher could not be started: {e}", "HeMi Launcher se nepodařilo spustit: {e}");
+                        self.toast(t.replace("{e}", &e.to_string()), Tone::Critical);
+                    }
+                }
                 Action::OpenLicences => {
                     let file = std::env::temp_dir().join("HeMiPix-ThirdPartyNotices.txt");
                     match std::fs::write(&file, include_str!("../assets/ThirdPartyNotices.txt")) {
-                        Ok(()) => shell_open(&file.display().to_string()),
+                        Ok(()) => self.open_target(&file.display().to_string()),
                         Err(e) => self.toast(e.to_string(), Tone::Critical),
                     }
                 }
@@ -1241,8 +1287,11 @@ fn walk(dir: &Path, depth: u32, format: Format, out: &mut Vec<PathBuf>) {
     let mut list: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
     list.sort();
     for p in list {
+        // junctions and symbolic links are not followed: the same photos would come again under another path (on
+        // Windows `is_symlink` is true for both – the name-surrogate reparse points – but not for OneDrive folders)
+        let link = std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink());
         if p.is_dir() {
-            if !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+            if !link && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
                 walk(&p, depth + 1, format, out);
             }
         } else if convert::is_input(&p) && !format.is(&p) {
@@ -1281,17 +1330,9 @@ fn size_text(bytes: u64) -> String {
     format!("{text} {unit}")
 }
 
-fn shell_open(target: &str) {
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let w = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let (verb, t) = (w("open"), w(target));
-    unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), t.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
-}
-
 /// File Explorer with the file selected.
-fn show_in_explorer(file: &Path) {
-    let _ = std::process::Command::new(crate::deps::program("explorer.exe")).arg(format!("/select,{}", file.display())).spawn();
+fn show_in_explorer(file: &Path) -> std::io::Result<()> {
+    std::process::Command::new(crate::deps::program("explorer.exe")).arg(format!("/select,{}", file.display())).spawn().map(drop)
 }
 
 /// The window as the owner of the file dialogs.
@@ -1301,12 +1342,14 @@ impl HasWindowHandle for Parent {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         let hwnd = std::num::NonZeroIsize::new(self.0).ok_or(HandleError::Unavailable)?;
         let raw = RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(hwnd));
+        // SAFETY: the handle is the main window of this app, which outlives the modal file dialog that borrows it.
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
     }
 }
 
 impl HasDisplayHandle for Parent {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        // SAFETY: a Windows display handle holds no pointer; it is valid for as long as the process runs.
         Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Windows(WindowsDisplayHandle::new())) })
     }
 }

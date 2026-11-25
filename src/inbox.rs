@@ -12,7 +12,8 @@ fn dir() -> PathBuf {
 
 /// True when this is the first HeMiPix of the user (the mutex stays for the life of the process).
 pub fn first() -> bool {
-    let name: Vec<u16> = "Local\\HeMiPix.Window".encode_utf16().chain([0]).collect();
+    let name = crate::sys::wide("Local\\HeMiPix.Window");
+    // SAFETY: `name` is NUL-terminated UTF-16; the handle is deliberately never closed (the mutex marks this process).
     unsafe {
         let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         !handle.is_null() && GetLastError() != ERROR_ALREADY_EXISTS
@@ -22,6 +23,8 @@ pub fn first() -> bool {
 /// Leaves the photos for the running window and brings it to the front.
 pub fn send(paths: &[PathBuf]) {
     if !paths.is_empty() {
+        // this start has no window to report a failure in: when the inbox cannot be written, its photos are not
+        // handed over (the window still comes to the front, and they can be dropped on it)
         let _ = std::fs::create_dir_all(dir());
         let text: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         let name = format!("{}-{}.txt", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
@@ -31,7 +34,9 @@ pub fn send(paths: &[PathBuf]) {
             let _ = std::fs::rename(&tmp, dir().join(name));
         }
     }
-    let title: Vec<u16> = "HeMiPix".encode_utf16().chain([0]).collect();
+    let title = crate::sys::wide("HeMiPix");
+    // SAFETY: `title` is NUL-terminated UTF-16; the window functions only get the handle FindWindowW returned (checked
+    // for null), and a window that closed meanwhile only makes them fail.
     unsafe {
         let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
         if !hwnd.is_null() {
@@ -53,6 +58,7 @@ pub fn take() -> Vec<PathBuf> {
         if let Ok(text) = std::fs::read_to_string(&f) {
             paths.extend(text.lines().filter(|l| !l.trim().is_empty()).map(PathBuf::from));
         }
+        // a list that cannot be removed would be read again; its photos are then only known already (not added twice)
         let _ = std::fs::remove_file(&f);
     }
     paths

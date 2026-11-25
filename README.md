@@ -34,7 +34,8 @@ Extensions** from the Microsoft Store (most PCs have them; the installer – and
 - **Crop** any photo of the list: a preview with a frame to drag by its corners and edges or to move, free or in a
   fixed shape (1:1, 4:3, 3:2, 16:9 – turned for upright photos), the size in pixels shown; ‹ › go through the photos.
 - **Upright**: photos come out turned the right way, also JPGs with an Exif orientation.
-- **Metadata** (Exif: date taken, camera, location) is kept in JPG, PNG and WebP – or kept **without the location**, or removed (one choice);
+- **Metadata** (Exif: date taken, camera, location) is kept in JPG, PNG and WebP – or kept **without the location**
+  (only the GPS data goes; serial numbers of the camera, the owner's name and the maker notes stay), or removed (one choice);
   the color profile (Display P3 of iPhones) stays too; the file date of the original stays, so the photos sort as
   before.
 - **Where to**: next to the photos, into a folder named by the format (“JPG”, “PNG” …) beside them, or into one chosen
@@ -42,9 +43,12 @@ Extensions** from the Microsoft Store (most PCs have them; the installer – and
   are of the chosen format are left out.
 - **Mica** of Windows 11 behind the window, light and dark as Windows (or as chosen in Settings).
 - **File Explorer item** “Convert with HeMiPix” for HEIC photos and folders – a switch in Settings (the gear), off by default,
-  written only for the current user.
+  written only for the current user. A portable copy started later does not take over the item of the installed
+  HeMiPix (only an item whose program is gone is pointed to it). With an installation for all users, each user turns
+  their own item off; uninstalling removes only the item of the user who uninstalls.
 
-Its settings are in `%AppData%\HeMi\HeMiPix\settings.ini`.
+Its settings are in `%AppData%\HeMi\HeMiPix\settings.ini`. When File Explorer starts HeMiPix for several photos, the
+later starts leave their lists for the first window in `%TEMP%\HeMiPix-inbox` (read and deleted within a second).
 
 ## Building
 
@@ -78,6 +82,7 @@ installer (`installer\HeMiPix.iss`) and the portable exe files (x64 and ARM64). 
 | `src\inbox.rs` | Photos from other starts of HeMiPix (File Explorer starts it once per selected photo). |
 | `src\settings.rs` | What HeMiPix remembers between runs. |
 | `src\shell_menu.rs` | The optional File Explorer item (`HKCU\Software\Classes`). |
+| `src\sys.rs` | Small shared helpers for the Windows API (UTF-16 strings, opening links). |
 | `src\theme.rs`, `src\widgets.rs`, `src\i18n.rs` | The Windows 11 look in egui and the texts in two languages. |
 | `assets` | The icon and the notices of the components. |
 

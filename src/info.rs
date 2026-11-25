@@ -15,16 +15,20 @@ pub fn read(src: &Path, remove_gps: bool) -> Option<Vec<u8>> {
     patch(&mut tiff, remove_gps).map(|()| tiff)
 }
 
-/// The JPG with the Exif block as APP1 right after its start (after JFIF, when there is one).
-pub fn insert(jpg: &[u8], tiff: &[u8]) -> Vec<u8> {
+/// The JPG with the Exif block as APP1 right after its start (after JFIF, when there is one); None when it does not
+/// fit (one APP1 segment holds at most 64 KB) or the JPG is not one.
+pub fn insert(jpg: &[u8], tiff: &[u8]) -> Option<Vec<u8>> {
     let len = tiff.len() + 6 + 2;
     if jpg.len() < 4 || jpg[0] != 0xFF || jpg[1] != 0xD8 || len > 0xFFFF {
-        return jpg.to_vec();
+        return None;
     }
     let mut at = 2;
     // JFIF (APP0) stays first
     if jpg[2] == 0xFF && jpg[3] == 0xE0 && jpg.len() > 6 {
         at = 4 + u16::from_be_bytes([jpg[4], jpg[5]]) as usize;
+    }
+    if at > jpg.len() {
+        return None;
     }
     let mut out = Vec::with_capacity(jpg.len() + len + 2);
     out.extend_from_slice(&jpg[..at]);
@@ -33,7 +37,7 @@ pub fn insert(jpg: &[u8], tiff: &[u8]) -> Vec<u8> {
     out.extend_from_slice(b"Exif\0\0");
     out.extend_from_slice(tiff);
     out.extend_from_slice(&jpg[at..]);
-    out
+    Some(out)
 }
 
 struct Tiff<'a> {
@@ -266,9 +270,17 @@ mod tests {
     #[test]
     fn app1_after_jfif() {
         let jpg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 1, 2, 0xFF, 0xD9];
-        let out = insert(&jpg, b"MM");
+        let out = insert(&jpg, b"MM").unwrap();
         assert_eq!(&out[..8], &[0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 1, 2]);
         assert_eq!(&out[8..10], &[0xFF, 0xE1]);
         assert_eq!(&out[12..18], b"Exif\0\0");
+    }
+
+    #[test]
+    fn too_big_exif_is_reported() {
+        // more than one APP1 segment holds: None, so the row can say the metadata is missing
+        let jpg = [0xFF, 0xD8, 0xFF, 0xD9];
+        assert!(insert(&jpg, &vec![0u8; 70_000]).is_none());
+        assert!(insert(b"not a jpg", b"MM").is_none());
     }
 }
