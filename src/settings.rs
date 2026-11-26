@@ -32,6 +32,8 @@ pub struct Settings {
     pub existing: Existing,
     pub keep_exif: bool,
     pub remove_gps: bool,
+    /// The log of the conversions (log.txt next to settings.ini); off by default.
+    pub logging: bool,
 }
 
 impl Default for Settings {
@@ -44,13 +46,14 @@ impl Default for Settings {
             existing: Existing::Number,
             keep_exif: true,
             remove_gps: false,
+            logging: false,
         }
     }
 }
 
-/// %AppData%\HeMi\HeMiPix\settings.ini – the settings of all HeMi apps are under %AppData%\HeMi; the folder of the older
-/// versions (%AppData%\HeMiPix) is moved there the first time.
-fn file() -> Option<PathBuf> {
+/// %AppData%\HeMi\HeMiPix – the settings of all HeMi apps are under %AppData%\HeMi; the folder of the older versions
+/// (%AppData%\HeMiPix) is moved there the first time.
+pub fn dir() -> Option<PathBuf> {
     let roaming = PathBuf::from(std::env::var_os("APPDATA")?);
     let dir = roaming.join("HeMi").join("HeMiPix");
     let old = roaming.join("HeMiPix");
@@ -59,7 +62,12 @@ fn file() -> Option<PathBuf> {
         let _ = std::fs::create_dir_all(roaming.join("HeMi"));
         let _ = std::fs::rename(&old, &dir);
     }
-    Some(dir.join("settings.ini"))
+    Some(dir)
+}
+
+/// %AppData%\HeMi\HeMiPix\settings.ini
+fn file() -> Option<PathBuf> {
+    Some(dir()?.join("settings.ini"))
 }
 impl Settings {
     pub fn options(&self) -> Options {
@@ -93,6 +101,7 @@ impl Settings {
                 }
                 "KeepExif" => s.keep_exif = b,
                 "RemoveGps" => s.remove_gps = b,
+                "Logging" => s.logging = b,
                 _ => {}
             }
         }
@@ -117,7 +126,7 @@ impl Settings {
             Existing::Skip => "skip",
         };
         let text = format!(
-            "Format={}\nQuality={}\nOutput={}\nFolder={}\nExisting={}\nKeepExif={}\nRemoveGps={}\n",
+            "Format={}\nQuality={}\nOutput={}\nFolder={}\nExisting={}\nKeepExif={}\nRemoveGps={}\nLogging={}\n",
             self.format.ext(),
             self.quality,
             output,
@@ -125,6 +134,7 @@ impl Settings {
             existing,
             b(self.keep_exif),
             b(self.remove_gps),
+            b(self.logging),
         );
         write_atomic(&f, &text)
     }

@@ -71,6 +71,9 @@ enum Action {
     OpenOutput,
     ShowFile(PathBuf),
     ToggleMenu,
+    ToggleLogging,
+    OpenLog,
+    OpenSettingsFolder,
     About(bool),
     Open(String),
     OpenLicences,
@@ -168,6 +171,7 @@ impl HeMiPixApp {
             deps_tx,
             deps_rx,
         };
+        crate::log::set(app.s.logging);
         app.check_deps(&cc.egui_ctx);
         app.add(paths);
         app
@@ -232,6 +236,7 @@ impl HeMiPixApp {
             let dst = match self.s.existing {
                 Existing::Replace if !same && !taken.contains(&key(&first)) => first,
                 Existing::Skip if first.exists() || taken.contains(&key(&first)) => {
+                    crate::log::write(&format!("Skipped {} – {} exists", item.src.display(), first.display()));
                     item.state = State::Skipped;
                     continue;
                 }
@@ -254,6 +259,8 @@ impl HeMiPixApp {
             return self.toast(tr("Nothing to convert – the files exist already.", "Není co převádět – soubory už existují."), Tone::Caution);
         }
         self.save_settings();
+        let quality = if self.s.format.lossy() { format!(", quality {}", self.s.quality) } else { String::new() };
+        crate::log::write(&format!("Converting {} photo(s) to {}{quality}", jobs.len(), self.s.format.label()));
         self.run_id += 1;
         let stop = Arc::new(AtomicBool::new(false));
         self.run = Some(Run { stop: stop.clone(), total: jobs.len(), finished: 0 });
@@ -286,18 +293,31 @@ impl HeMiPixApp {
                     {
                         run.finished += 1;
                     }
+                    let format = self.s.format.label();
                     let Some(item) = self.items.get_mut(i) else { continue };
                     item.state = match r {
                         Ok(d) => {
+                            crate::log::write(&format!(
+                                "Converted {} → {} ({format}, {} → {}{})",
+                                item.src.display(),
+                                d.out.display(),
+                                size_text(d.in_size),
+                                size_text(d.out_size),
+                                d.note.map(|n| format!(", {n}")).unwrap_or_default()
+                            ));
                             self.last_out = Some(d.out.clone());
                             item.last_out = Some(d.out.clone());
                             State::Done(d)
                         }
                         Err(Fail::NoCodec) => {
+                            crate::log::write(&format!("Failed {}: no codec – Windows cannot read this photo", item.src.display()));
                             self.no_codec = true;
                             State::Failed(tr("Windows cannot read this photo.", "Windows tuhle fotku neumí přečíst.").into())
                         }
-                        Err(Fail::Msg(m)) => State::Failed(m),
+                        Err(Fail::Msg(m)) => {
+                            crate::log::write(&format!("Failed {}: {m}", item.src.display()));
+                            State::Failed(m)
+                        }
                     };
                 }
                 Event::AllDone => {
@@ -313,6 +333,7 @@ impl HeMiPixApp {
                     let stopped = self.run.take().is_some_and(|r| r.stop.load(Ordering::Relaxed));
                     let failed = self.items.iter().filter(|i| matches!(i.state, State::Failed(_))).count();
                     let ok = self.items.iter().filter(|i| matches!(i.state, State::Done(_))).count();
+                    crate::log::write(&format!("{}: {ok} converted, {failed} failed", if stopped { "Stopped" } else { "Finished" }));
                     if stopped {
                         self.toast(tr("Stopped.", "Zastaveno."), Tone::Caution);
                     } else if failed > 0 {
@@ -355,7 +376,11 @@ impl HeMiPixApp {
     }
 
     fn toast(&mut self, text: impl Into<String>, tone: Tone) {
-        self.toast = Some(Toast { text: text.into(), tone, until: Instant::now() + Duration::from_secs(6) });
+        let text = text.into();
+        if tone == Tone::Critical {
+            crate::log::write(&format!("Error: {text}"));
+        }
+        self.toast = Some(Toast { text, tone, until: Instant::now() + Duration::from_secs(6) });
     }
 
     /// Saves the settings; when that fails, a note says so (the settings still apply until HeMiPix ends).
@@ -532,8 +557,36 @@ impl HeMiPixApp {
                     }
                 });
             });
-        });        ui.add_space(14.0);
-        section(ui, &p, tr("About", "O aplikaci"));        ui.spacing_mut().item_spacing.y = 4.0;
+        });
+        ui.add_space(14.0);
+        section(ui, &p, tr("Logging", "Logování"));
+        card(ui, &p, |ui| {
+            row_layout(ui, 44.0, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new(if self.s.logging { tr("On", "Zapnuto") } else { tr("Off", "Vypnuto") }).size(14.0).color(p.text));
+                    if toggle(ui, &p, self.s.logging).clicked() {
+                        acts.push(Action::ToggleLogging);
+                    }
+                    ui.add_space(8.0);
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let detail = tr(
+                            "Conversions and errors in log.txt (at most 1 MB), no photo metadata",
+                            "Převody a chyby do log.txt (nejvýš 1 MB), žádná metadata fotek",
+                        );
+                        two_lines(ui, &p, tr("Logging", "Logování"), detail);
+                    });
+                });
+            });
+        });
+        let files = [(tr("Open log", "Otevřít log"), "log.txt"), (tr("Open settings folder", "Otevřít složku nastavení"), r"%AppData%\HeMi\HeMiPix")];
+        match card(ui, &p, |ui| crate::widgets::button_row(ui, &p, &files)) {
+            Some(0) => acts.push(Action::OpenLog),
+            Some(_) => acts.push(Action::OpenSettingsFolder),
+            None => {}
+        }
+        ui.add_space(14.0);
+        section(ui, &p, tr("About", "O aplikaci"));
+        ui.spacing_mut().item_spacing.y = 4.0;
         let value = |ui: &mut egui::Ui, label: &str, value: &str| {
             card(ui, &p, |ui| {
                 row_layout(ui, 44.0, |ui| {
@@ -1110,6 +1163,28 @@ impl HeMiPixApp {
                     Ok(()) => self.menu_on = crate::shell_menu::is_on(),
                     Err(e) => self.toast(e, Tone::Critical),
                 },
+                Action::ToggleLogging => {
+                    self.s.logging = !self.s.logging;
+                    crate::log::set(self.s.logging);
+                    self.save_settings();
+                }
+                Action::OpenLog => match crate::log::file().filter(|f| f.is_file()) {
+                    Some(f) => self.open_target(&f.display().to_string()),
+                    None => {
+                        let t = tr("There is no log yet – turn on Logging and convert some photos.", "Log zatím není – zapni Logování a převeď nějaké fotky.");
+                        self.toast(t, Tone::Caution);
+                    }
+                },
+                Action::OpenSettingsFolder => {
+                    let r = crate::settings::dir()
+                        .ok_or_else(|| std::io::Error::other("%AppData%"))
+                        .and_then(|d| std::fs::create_dir_all(&d).map(|()| d))
+                        .and_then(|d| std::process::Command::new(crate::deps::program("explorer.exe")).arg(d).spawn().map(drop));
+                    if let Err(e) = r {
+                        let t = tr("File Explorer could not be opened: {e}", "Průzkumník souborů se nepodařilo otevřít: {e}");
+                        self.toast(t.replace("{e}", &e.to_string()), Tone::Critical);
+                    }
+                }
                 Action::About(on) => self.about = on,
                 Action::Open(t) => self.open_target(&t),
                 Action::Launcher => {
