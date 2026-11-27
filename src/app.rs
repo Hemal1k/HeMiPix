@@ -1160,7 +1160,20 @@ impl HeMiPixApp {
                 }
                 Action::ShowFile(f) => self.show_file(&f),
                 Action::ToggleMenu => match crate::shell_menu::set(!self.menu_on) {
-                    Ok(()) => self.menu_on = crate::shell_menu::is_on(),
+                    Ok(()) => {
+                        self.menu_on = crate::shell_menu::is_on();
+                        // Windows 11 shows it only under "Show more options" (its new menu has no place for it without a
+                        // signed package; the classic menu of Windows 10 is ignored by current builds)
+                        let text = match (self.menu_on, crate::sys::windows_11()) {
+                            (true, true) => tr(
+                                "HeMiPix is in the File Explorer menu of photos and folders, under “Show more options”.",
+                                "HeMiPix je v nabídce fotek a složek v Průzkumníkovi pod „Zobrazit další možnosti“.",
+                            ),
+                            (true, false) => tr("HeMiPix is in the File Explorer menu of photos and folders.", "HeMiPix je v nabídce fotek a složek v Průzkumníkovi."),
+                            _ => tr("The item was removed from the File Explorer menu.", "Položka byla z nabídky Průzkumníka souborů odebrána."),
+                        };
+                        self.toast(text, Tone::Success);
+                    }
                     Err(e) => self.toast(e, Tone::Critical),
                 },
                 Action::ToggleLogging => {

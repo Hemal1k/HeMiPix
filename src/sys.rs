@@ -17,6 +17,22 @@ pub fn open(target: &str) -> bool {
     r as isize > 32
 }
 
+/// Windows 11 (build 22000 and newer): its new context menu shows the item only under "Show more options".
+pub fn windows_11() -> bool {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    let k = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let n = wide("CurrentBuildNumber");
+    let mut buf = [0u16; 32];
+    let mut size = std::mem::size_of_val(&buf) as u32;
+    // SAFETY: the names are NUL-terminated and live for the call; `size` is the size of `buf` in bytes.
+    let r = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, k.as_ptr(), n.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) };
+    if r != windows_sys::Win32::Foundation::ERROR_SUCCESS {
+        return false;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end]).trim().parse::<u32>().is_ok_and(|b| b >= 22000)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
