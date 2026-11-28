@@ -32,7 +32,7 @@ pub struct Settings {
     pub existing: Existing,
     pub keep_exif: bool,
     pub remove_gps: bool,
-    /// The log of the conversions (log.txt next to settings.ini); off by default.
+    /// The log of the conversions (Logs\log-<day>.txt next to settings.ini); off by default.
     pub logging: bool,
 }
 

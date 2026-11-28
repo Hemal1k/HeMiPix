@@ -172,6 +172,7 @@ impl HeMiPixApp {
             deps_rx,
         };
         crate::log::set(app.s.logging);
+        crate::log::catch_panics();
         app.check_deps(&cc.egui_ctx);
         app.add(paths);
         app
@@ -570,15 +571,15 @@ impl HeMiPixApp {
                     ui.add_space(8.0);
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         let detail = tr(
-                            "Conversions and errors in log.txt (at most 1 MB), no photo metadata",
-                            "Převody a chyby do log.txt (nejvýš 1 MB), žádná metadata fotek",
+                            "Conversions and errors, one log a day (the last week), no photo metadata",
+                            "Převody a chyby, jeden log za den (poslední týden), žádná metadata fotek",
                         );
                         two_lines(ui, &p, tr("Logging", "Logování"), detail);
                     });
                 });
             });
         });
-        let files = [(tr("Open log", "Otevřít log"), "log.txt"), (tr("Open settings folder", "Otevřít složku nastavení"), r"%AppData%\HeMi\HeMiPix")];
+        let files = [(tr("Open log", "Otevřít log"), r"Logs\log-<day>.txt"), (tr("Open settings folder", "Otevřít složku nastavení"), r"%AppData%\HeMi\HeMiPix")];
         match card(ui, &p, |ui| crate::widgets::button_row(ui, &p, &files)) {
             Some(0) => acts.push(Action::OpenLog),
             Some(_) => acts.push(Action::OpenSettingsFolder),
